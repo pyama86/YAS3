@@ -1,0 +1,18 @@
+announcement_channels = ["all-pyama-dev"]
+
+[[services]]
+id = 1
+name = "yas3"
+incident_team_members = ["pyama"]
+
+[[incident_levels]]
+level = 1
+description = "サービスに影響が出ている"
+
+[[incident_levels]]
+level = 2
+description = "サービスにはんぱない影響が出ている"
+
+[[incident_levels]]
+level = 3
+description = "もうおしまいだ、すべてが終わった"
