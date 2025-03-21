@@ -68,7 +68,7 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 
 		switch action.ActionID {
 		case "incident_action":
-			if err := h.openIncidentModal(callback.TriggerID, callback.Channel.ID, callback.User.ID); err != nil {
+			if err := h.openIncidentModal(callback.TriggerID, callback.Channel.ID); err != nil {
 				return fmt.Errorf("openIncidentModal failed: %w", err)
 			}
 
@@ -182,7 +182,8 @@ func (h *CallbackHandler) submitHandler(userID, channelID string) error {
 
 	return nil
 }
-func (h *CallbackHandler) openIncidentModal(triggerID, channelID, userID string) error {
+
+func (h *CallbackHandler) openIncidentModal(triggerID, channelID string) error {
 	titleText := slack.NewTextBlockObject("plain_text", "🚨 インシデントチャンネル作成", false, false)
 	submitText := slack.NewTextBlockObject("plain_text", "✅ 作成", false, false)
 	closeText := slack.NewTextBlockObject("plain_text", "❌ キャンセル", false, false)
@@ -658,18 +659,17 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		title = t
 		summary = s
 		postmortemFileTitle = fmt.Sprintf("postmortem-%s", t)
+		incident.Description = s
 	}
 
 	rendered := postmortem.Render(title, createdAt.Format("2006-01-02 15:04:05"), author, summary, formattedMessages, channelURL)
-	if err != nil {
-		return fmt.Errorf("failed to Render: %w", err)
-	}
 
 	if h.postmortemExporter != nil {
-		err = h.postmortemExporter.ExportPostMortem(h.ctx, postmortemFileTitle, rendered)
+		url, err := h.postmortemExporter.ExportPostMortem(h.ctx, postmortemFileTitle, rendered)
 		if err != nil {
 			return fmt.Errorf("failed to ExportPostMortem: %w", err)
 		}
+		incident.PostMortemURL = url
 	} else {
 		// アップロードする
 		err = h.slackRepository.UploadFile(channel.ID, postmortemFileTitle, title, rendered)
@@ -682,6 +682,10 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		channel.ID,
 		slack.MsgOptionText("✅️ポストモーテムを作成しました", false),
 	)
+
+	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
+		return fmt.Errorf("failed to SaveIncident: %w", err)
+	}
 	return nil
 }
 

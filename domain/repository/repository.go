@@ -36,7 +36,7 @@ type RepositoryFacade struct {
 }
 
 type PostMortemExporter interface {
-	ExportPostMortem(context.Context, string, string) error
+	ExportPostMortem(context.Context, string, string) (string, error)
 }
 
 func NewRepository(incidentRepository IncidentRepository, serviceRepository ServiceRepository, incidentLevelRepository IncidentLevelRepository) Repository {

@@ -29,9 +29,7 @@ func NewConfluenceRepository(domain, user, password, spaceKey, ancestorID string
 	}, nil
 }
 
-// ExportPostMortem(context.Context, string) error
-
-func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body string) error {
+func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body string) (string, error) {
 	data := &goconfluence.Content{
 		Type:  "page",
 		Title: title,
@@ -57,10 +55,10 @@ func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body
 		}
 	}
 
-	_, err := c.client.CreateContent(data)
+	page, err := c.client.CreateContent(data)
 	if err != nil {
-		return fmt.Errorf("failed to create confluence page: %w", err)
+		return "", fmt.Errorf("failed to create confluence page: %w", err)
 	}
 
-	return err
+	return page.Links.WebUI, nil
 }
