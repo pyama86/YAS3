@@ -2,14 +2,6 @@ package entity
 
 import "time"
 
-type IncidentTypeEnum int
-
-const (
-	IncidentTypeEnumSecurity IncidentTypeEnum = iota
-	IncidentTypeEnumService
-	IncidentTypeEnumOther
-)
-
 type Incident struct {
 	ChannelID       string    `json:"channel_id" dynamo:"channel_id,hash"`
 	Description     string    `json:"description" dynamo:"description"`
