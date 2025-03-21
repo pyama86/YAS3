@@ -3,9 +3,7 @@
 **yas3** は Slack をベースとしたインシデントマネジメントボットです。
 「Yet Another sssbot（インシデント対応支援ボット）」として、Slackチャンネルでインシデントの受付から報告、復旧、ポストモーテム作成までを支援します。
 
-sssbotとは[@hiboma](https://github.com/hiboma) が開発しているインシデント支援ボットです。詳細は下記を参照してください。
-
-<script defer class="speakerdeck-embed" data-id="78f2fd4e8069455fb43e8902fac6b0f4" data-ratio="1.7777777777777777" src="//speakerdeck.com/assets/embed.js"></script>
+sssbotとは[@hiboma](https://github.com/hiboma) が開発しているインシデント支援ボットです。詳細は[こちら](https://speakerdeck.com/hiboma/insidentoresuponsuwozi-dong-hua-dezhi-yuan-suru-slack-bot-deren-ji-ti-nasekiyuriteidui-ce-woshi-xian-suru)してください。
 
 ## Features
 
