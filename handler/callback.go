@@ -24,11 +24,12 @@ func timeNow() time.Time {
 }
 
 type CallbackHandler struct {
-	ctx             context.Context
-	repository      repository.Repository
-	slackRepository *repository.SlackRepository
-	aiRepository    *repository.AIRepository
-	workSpaceURL    string
+	ctx                context.Context
+	repository         repository.Repository
+	slackRepository    *repository.SlackRepository
+	aiRepository       *repository.AIRepository
+	postmortemExporter repository.PostMortemExporter
+	workSpaceURL       string
 }
 
 var urgencyColorMap = map[string]string{
@@ -43,14 +44,16 @@ func NewCallbackHandler(
 	repository repository.Repository,
 	slackRepository *repository.SlackRepository,
 	aiRepository *repository.AIRepository,
+	postmortemExporter repository.PostMortemExporter,
 	workSpaceURL string,
 ) *CallbackHandler {
 	return &CallbackHandler{
-		ctx:             ctx,
-		repository:      repository,
-		slackRepository: slackRepository,
-		aiRepository:    aiRepository,
-		workSpaceURL:    workSpaceURL,
+		ctx:                ctx,
+		repository:         repository,
+		slackRepository:    slackRepository,
+		aiRepository:       aiRepository,
+		workSpaceURL:       workSpaceURL,
+		postmortemExporter: postmortemExporter,
 	}
 }
 
@@ -606,15 +609,28 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	type message struct {
 		ts   time.Time
 		text string
+		user string
 	}
 
 	var messages []message
+	var userCache = map[string]string{}
 	for _, m := range pinnedMessages {
 		ts, err := parseSlackTimestamp(m.Timestamp)
 		if err != nil {
 			return fmt.Errorf("failed to parseSlackTimestamp: %w", err)
 		}
-		messages = append(messages, message{ts: ts, text: m.Text})
+		if userCache[m.User] == "" {
+			user, err := h.slackRepository.GetUserByID(m.User)
+			if err != nil {
+				return fmt.Errorf("failed to GetUserByID: %w", err)
+			}
+			userCache[m.User] = h.slackRepository.GetUserPreferredName(user)
+		}
+		messages = append(messages, message{
+			ts:   ts,
+			text: m.Text,
+			user: userCache[m.User],
+		})
 	}
 
 	// messageを時系列順に並び替え
@@ -629,13 +645,14 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	}
 
 	for _, m := range messages {
-		formattedMessages += fmt.Sprintf("- %s %s\n", m.ts.Format("2006-01-02 15:04:05"), m.text)
+		formattedMessages += fmt.Sprintf("- %s %s:%s\n", m.ts.Format("2006-01-02 15:04:05"), m.user, m.text)
 	}
 	formattedMessages += fmt.Sprintf("- %s %sさんがインシデントを復旧を宣言\n", recoveredAt.Format("2006-01-02 15:04:05"), h.slackRepository.GetUserPreferredName(recoveredUser))
 
 	channelURL := fmt.Sprintf("%sarchives/%s", h.workSpaceURL, channel.ID)
 	title := "例: サービスAPIが応答停止"
 	summary := "例: サービスAPIが応答しない"
+	postmortemFileTitle := fmt.Sprintf("postmortem-%s", channel.Name)
 
 	if h.aiRepository != nil {
 		t, err := h.aiRepository.GenerateTitle(incident.Description, formattedMessages)
@@ -648,6 +665,7 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		}
 		title = t
 		summary = s
+		postmortemFileTitle = fmt.Sprintf("postmortem-%s", t)
 	}
 
 	rendered := postmortem.Render(title, createdAt.Format("2006-01-02 15:04:05"), author, summary, formattedMessages, channelURL)
@@ -655,11 +673,17 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		return fmt.Errorf("failed to Render: %w", err)
 	}
 
-	// アップロードする
-	filename := fmt.Sprintf("postmortem-%s.md", channel.Name)
-	err = h.slackRepository.UploadFile(channel.ID, filename, title, rendered)
-	if err != nil {
-		return fmt.Errorf("failed to UploadFile: %w", err)
+	if h.postmortemExporter != nil {
+		err = h.postmortemExporter.ExportPostMortem(h.ctx, postmortemFileTitle, rendered)
+		if err != nil {
+			return fmt.Errorf("failed to ExportPostMortem: %w", err)
+		}
+	} else {
+		// アップロードする
+		err = h.slackRepository.UploadFile(channel.ID, postmortemFileTitle, title, rendered)
+		if err != nil {
+			return fmt.Errorf("failed to UploadFile: %w", err)
+		}
 	}
 
 	h.slackRepository.PostMessage(

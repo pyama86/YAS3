@@ -36,14 +36,41 @@ func Handle(ctx context.Context, configPath string) error {
 	workSpaceURL := authTest.URL
 	slog.Info("Bot ID", slog.String("bot_id", botID))
 
-	repo, err := repository.NewRepository(configPath)
+	dynamoRepository, err := repository.NewDynamoDBRepository()
 	if err != nil {
 		return err
 	}
+
+	cfgRepository, err := repository.NewConfigRepository(configPath)
+	if err != nil {
+		return err
+	}
+
 	slackRepository := repository.NewSlackRepository(webApi)
+
 	airtableRepository, err := repository.NewAIRepository()
 	if err != nil {
 		return err
+	}
+
+	repo := repository.NewRepository(dynamoRepository, cfgRepository, cfgRepository)
+	if err != nil {
+		return err
+	}
+
+	var postmortemExporter repository.PostMortemExporter
+	if os.Getenv("CONFLUENCE_USERNAME") != "" && os.Getenv("CONFLUENCE_PASSWORD") != "" && cfgRepository.Confluence.Domain != "" {
+		r, err := repository.NewConfluenceRepository(
+			cfgRepository.Confluence.Domain,
+			os.Getenv("CONFLUENCE_USERNAME"),
+			os.Getenv("CONFLUENCE_PASSWORD"),
+			cfgRepository.Confluence.Space,
+			cfgRepository.Confluence.AncestorID,
+		)
+		if err != nil {
+			return err
+		}
+		postmortemExporter = r
 	}
 
 	eventHandler := NewEventHandler(
@@ -51,11 +78,13 @@ func Handle(ctx context.Context, configPath string) error {
 		webApi,
 		repo,
 	)
+
 	callbackHandler := NewCallbackHandler(
 		ctx,
 		repo,
 		slackRepository,
 		airtableRepository,
+		postmortemExporter,
 		workSpaceURL,
 	)
 

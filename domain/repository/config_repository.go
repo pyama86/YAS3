@@ -39,6 +39,13 @@ type Config struct {
 	ServiceList             []entity.Service       `mapstructure:"services" validate:"required"`
 	AnnouncementChannelList []string               `mapstructure:"announcement_channels"`
 	IncidentLevelList       []entity.IncidentLevel `mapstructure:"incident_levels" validate:"required"`
+	Confluence              ConfluenceConfig       `mapstructure:"confluence"`
+}
+
+type ConfluenceConfig struct {
+	AncestorID string `mapstructure:"ancestor_id"`
+	Space      string `mapstructure:"space"`
+	Domain     string `mapstructure:"domain"`
 }
 
 func (c *Config) Services(_ context.Context) ([]entity.Service, error) {

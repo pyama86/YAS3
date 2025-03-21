@@ -10,6 +10,11 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
+type AIRepositorier interface {
+	Summarize(description, slackMessages string) (string, error)
+	GenerateTitle(description, slackMessages string) (string, error)
+}
+
 type AIRepository struct {
 	client *openai.Client
 	model  string

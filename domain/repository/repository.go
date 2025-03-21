@@ -35,19 +35,14 @@ type RepositoryFacade struct {
 	IncidentLevelRepository
 }
 
-func NewRepository(configPath string) (Repository, error) {
-	cfgRepository, err := NewConfigRepository(configPath)
-	if err != nil {
-		return nil, err
-	}
-	dynamoRepository, err := NewDynamoDBRepository()
-	if err != nil {
-		return nil, err
-	}
+type PostMortemExporter interface {
+	ExportPostMortem(context.Context, string, string) error
+}
 
+func NewRepository(incidentRepository IncidentRepository, serviceRepository ServiceRepository, incidentLevelRepository IncidentLevelRepository) Repository {
 	return RepositoryFacade{
-		IncidentRepository:      dynamoRepository,
-		ServiceRepository:       cfgRepository,
-		IncidentLevelRepository: cfgRepository,
-	}, nil
+		IncidentRepository:      incidentRepository,
+		ServiceRepository:       serviceRepository,
+		IncidentLevelRepository: incidentLevelRepository,
+	}
 }
