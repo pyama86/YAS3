@@ -54,9 +54,6 @@ func Handle(ctx context.Context, configPath string) error {
 	}
 
 	repo := repository.NewRepository(dynamoRepository, cfgRepository, cfgRepository)
-	if err != nil {
-		return err
-	}
 
 	var postmortemExporter repository.PostMortemExporter
 	if os.Getenv("CONFLUENCE_USERNAME") != "" && os.Getenv("CONFLUENCE_PASSWORD") != "" && cfgRepository.Confluence.Domain != "" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -355,9 +356,6 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		channel.ID,
 		slack.MsgOptionBlocks(blocks.HandlerRecruitmentMessage()...),
 	)
-	if err != nil {
-		return fmt.Errorf("failed to PostMessage: %w", err)
-	}
 	return nil
 }
 
@@ -634,15 +632,9 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	}
 
 	// messageを時系列順に並び替え
-	for i := 0; i < len(messages); i++ {
-		for j := i + 1; j < len(messages); j++ {
-			if messages[i].ts.After(messages[j].ts) {
-				tmp := messages[i]
-				messages[i] = messages[j]
-				messages[j] = tmp
-			}
-		}
-	}
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].ts.Before(messages[j].ts)
+	})
 
 	for _, m := range messages {
 		formattedMessages += fmt.Sprintf("- %s %s:%s\n", m.ts.Format("2006-01-02 15:04:05"), m.user, m.text)
