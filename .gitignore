@@ -1,3 +1,4 @@
 .env
+bin/
 docker
 example/test.toml

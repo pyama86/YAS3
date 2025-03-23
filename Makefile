@@ -1,7 +1,7 @@
 .PHONY: lint fmt ci test devdeps
 LINTER := golangci-lint
 build:
-	go build -o bin/ .
+	go build -o bin/yas3 .
 ci: devdeps lint test
 run:
 	go run . --config example/yas3.toml
