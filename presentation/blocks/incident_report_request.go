@@ -18,6 +18,10 @@ func IncidentReportRequest(userID string) []slack.Block {
 			nil,
 			nil,
 		),
+
+		slack.NewHeaderBlock(
+			slack.NewTextBlockObject("plain_text", "📝 まずは事象の内容を共有してください", false, false),
+		),
 		slack.NewRichTextBlock("事象内容を共有してください",
 			slack.NewRichTextList(slack.RTEListOrdered, 0,
 				slack.NewRichTextSection(

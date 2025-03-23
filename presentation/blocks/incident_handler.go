@@ -21,8 +21,10 @@ func AcceptIncidentHandler(userID string) []slack.Block {
 			nil,
 			nil,
 		),
-		// リッチテキストブロックで番号付きリストを表示
-		slack.NewRichTextBlock("ハンドラの責務",
+		slack.NewHeaderBlock(
+			slack.NewTextBlockObject("plain_text", "☀️  ハンドラの役割", false, false),
+		),
+		slack.NewRichTextBlock("ハンドラの役割",
 			slack.NewRichTextList(slack.RTEListOrdered, 0,
 				slack.NewRichTextSection(
 					slack.NewRichTextSectionTextElement("状況を迅速に把握し、初動対応を行う", nil),
