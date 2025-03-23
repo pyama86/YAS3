@@ -14,10 +14,10 @@ import (
 type EventHandler struct {
 	ctx        context.Context
 	client     *slack.Client
-	repository repository.IncidentRepository
+	repository repository.IncidentRepositoryer
 }
 
-func NewEventHandler(ctx context.Context, client *slack.Client, repository repository.IncidentRepository) *EventHandler {
+func NewEventHandler(ctx context.Context, client *slack.Client, repository repository.IncidentRepositoryer) *EventHandler {
 	return &EventHandler{
 		ctx:        ctx,
 		client:     client,

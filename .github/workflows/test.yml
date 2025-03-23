@@ -1,0 +1,35 @@
+name: Go
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Test for sqlite
+      run: make ci
+
+    - name: Test for dynamodb
+      run: make ci
+      env:
+        DB_DRIVER: dynamodb
+        DYNAMO_LOCAL: 1
+        DYNAMO_TABLE_NAME_PREFIX: test
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000

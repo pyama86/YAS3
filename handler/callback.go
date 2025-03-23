@@ -27,10 +27,9 @@ func timeNow() time.Time {
 type CallbackHandler struct {
 	ctx                context.Context
 	repository         repository.Repository
-	slackRepository    *repository.SlackRepository
-	aiRepository       *repository.AIRepository
-	postmortemExporter repository.PostMortemExporter
 	workSpaceURL       string
+	aiRepository       *repository.AIRepository
+	postmortemExporter repository.PostMortemRepositoryer
 }
 
 var urgencyColorMap = map[string]string{
@@ -43,15 +42,13 @@ var urgencyColorMap = map[string]string{
 func NewCallbackHandler(
 	ctx context.Context,
 	repository repository.Repository,
-	slackRepository *repository.SlackRepository,
-	aiRepository *repository.AIRepository,
-	postmortemExporter repository.PostMortemExporter,
 	workSpaceURL string,
+	aiRepository *repository.AIRepository,
+	postmortemExporter repository.PostMortemRepositoryer,
 ) *CallbackHandler {
 	return &CallbackHandler{
 		ctx:                ctx,
 		repository:         repository,
-		slackRepository:    slackRepository,
 		aiRepository:       aiRepository,
 		workSpaceURL:       workSpaceURL,
 		postmortemExporter: postmortemExporter,
@@ -72,13 +69,13 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				return fmt.Errorf("openIncidentModal failed: %w", err)
 			}
 
-			h.slackRepository.UpdateMessage(
+			h.repository.UpdateMessage(
 				callback.Channel.ID,
 				callback.Message.Timestamp,
 				slack.MsgOptionBlocks(blocks.UserIsTyping(callback.User.ID)...),
 			)
 		case "handler_button":
-			h.slackRepository.DeleteMessage(
+			h.repository.DeleteMessage(
 				callback.Channel.ID,
 				callback.Message.Timestamp,
 			)
@@ -86,7 +83,7 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				return fmt.Errorf("submitHandler failed: %w", err)
 			}
 		case "incident_level_button":
-			h.slackRepository.DeleteMessage(
+			h.repository.DeleteMessage(
 				callback.Channel.ID,
 				callback.Message.Timestamp,
 			)
@@ -97,7 +94,7 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				return fmt.Errorf("setIncidentLevel failed: %w", err)
 			}
 		case "postmortem_action":
-			h.slackRepository.UpdateMessage(
+			h.repository.UpdateMessage(
 				callback.Channel.ID,
 				callback.Message.Timestamp,
 				slack.MsgOptionText("📝 ポストモーテムを作成中...", false),
@@ -112,14 +109,14 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 					currentBlocks = currentBlocks[:len(currentBlocks)-1]
 				}
 
-				h.slackRepository.UpdateMessage(
+				h.repository.UpdateMessage(
 					callback.Channel.ID,
 					callback.Message.Timestamp,
 					slack.MsgOptionBlocks(currentBlocks...),
 				)
 
 			} else {
-				h.slackRepository.DeleteMessage(
+				h.repository.DeleteMessage(
 					callback.Channel.ID,
 					callback.Message.Timestamp,
 				)
@@ -175,7 +172,7 @@ func (h *CallbackHandler) submitHandler(userID, channelID string) error {
 		return fmt.Errorf("failed to SaveIncident: %w", err)
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.AcceptIncidentHandler(userID)...),
 	)
@@ -193,7 +190,7 @@ func (h *CallbackHandler) openIncidentModal(triggerID, channelID string) error {
 		return err
 	}
 
-	channelInfo, err := h.slackRepository.GetChannelByID(channelID)
+	channelInfo, err := h.repository.GetChannelByID(channelID)
 	if err != nil {
 		return err
 	}
@@ -210,7 +207,7 @@ func (h *CallbackHandler) openIncidentModal(triggerID, channelID string) error {
 		PrivateMetadata: channelID,
 	}
 
-	err = h.slackRepository.OpenView(triggerID, view)
+	err = h.repository.OpenView(triggerID, view)
 	if err != nil {
 		return err
 	}
@@ -228,7 +225,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	slog.Info("submitIncidentModal", slog.Any("serviceID", serviceID), slog.Any("summary_text", summaryText), slog.Any("channelName", channelName), slog.Any("urgency", urgency))
 
 	// チャンネル作成
-	c, err := h.slackRepository.GetChannelByName(channelName)
+	c, err := h.repository.GetChannelByName(channelName)
 	if err != nil && err != repository.ErrSlackNotFound {
 		return fmt.Errorf("failed to GetChannelByID: %w", err)
 	}
@@ -236,18 +233,18 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		channelName = fmt.Sprintf("%s-%02d", channelName, timeNow().Unix()%100)
 	}
 
-	channel, err := h.slackRepository.CreateConversation(slack.CreateConversationParams{
+	channel, err := h.repository.CreateConversation(slack.CreateConversationParams{
 		ChannelName: channelName,
 	})
 	if err != nil {
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			callback.Channel.ID,
 			slack.MsgOptionText(fmt.Sprintf("❌ チャンネルの作成に失敗しました:%s", err), false),
 		)
 
 		return fmt.Errorf("failed to CreateConversation: %w", err)
 	}
-	h.slackRepository.FlushChannelCache()
+	h.repository.FlushChannelCache()
 	num, err := strconv.Atoi(serviceID)
 	if err != nil {
 		return fmt.Errorf("failed to strconv.Atoi: %w", err)
@@ -279,14 +276,14 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	}
 
 	topic := fmt.Sprintf("サービス名:%s 緊急度:%s 事象内容:%s", service.Name, urgencyText, summaryText)
-	err = h.slackRepository.SetTopicOfConversation(channel.ID, topic)
+	err = h.repository.SetTopicOfConversation(channel.ID, topic)
 	if err != nil {
 		return fmt.Errorf("failed to SetPurposeOfConversation: %w", err)
 	}
 	var members []string
 	errMembers := []string{}
 	for _, member := range service.IncidentTeamMembers {
-		memberIDs, err := h.slackRepository.GetMemberIDs(member)
+		memberIDs, err := h.repository.GetMemberIDs(member)
 		if err != nil {
 			if err == repository.ErrSlackNotFound {
 				slog.Error("failed to GetMemberIDs", slog.Any("err", err), slog.Any("member", member))
@@ -298,19 +295,19 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	}
 
 	if len(members) > 0 {
-		err = h.slackRepository.InviteUsersToConversation(channel.ID, members...)
+		err = h.repository.InviteUsersToConversation(channel.ID, members...)
 		if err != nil {
 			return fmt.Errorf("failed to InviteUsersToConversation: %w", err)
 		}
 
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionBlocks(blocks.InviteMembers(service)...),
 		)
 	}
 
 	if len(errMembers) > 0 {
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText(fmt.Sprintf("❌ チームメンバーの取得に失敗しました:%s", strings.Join(errMembers, ",")), false),
 		)
@@ -320,14 +317,14 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		Color:  urgencyColorMap[urgency],
 		Blocks: slack.Blocks{BlockSet: blocks.IncidentCreated(summaryText, urgencyText, channel.ID, service)},
 	}
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionAttachments(attachment),
 	)
 
 	// 共有チャンネルにお知らせを投稿
 	for _, c := range h.repository.AnnouncementChannels(h.ctx) {
-		cinfo, err := h.slackRepository.GetChannelByName(c)
+		cinfo, err := h.repository.GetChannelByName(c)
 		if err != nil {
 			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
 		}
@@ -335,17 +332,17 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 			continue
 		}
 
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			cinfo.ID,
 			slack.MsgOptionAttachments(attachment),
 		)
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
 		)
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionBlocks(blocks.IncidentReportRequest(userID)...),
 	)
@@ -353,7 +350,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		return fmt.Errorf("failed to PostMessage: %w", err)
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionBlocks(blocks.HandlerRecruitmentMessage()...),
 	)
@@ -371,7 +368,7 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		return fmt.Errorf("incident is nil")
 	}
 	if !incident.RecoveredAt.IsZero() {
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionBlocks(blocks.AlreadyRecovered()...),
 		)
@@ -390,13 +387,13 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		return fmt.Errorf("failed to ServiceByID: %w", err)
 	}
 
-	channel, err := h.slackRepository.GetChannelByID(channelID)
+	channel, err := h.repository.GetChannelByID(channelID)
 	if err != nil {
 		return fmt.Errorf("failed to GetChannelByID: %w", err)
 	}
 
 	topic := fmt.Sprintf("【復旧】%s", channel.Topic.Value)
-	err = h.slackRepository.SetTopicOfConversation(channel.ID, topic)
+	err = h.repository.SetTopicOfConversation(channel.ID, topic)
 	if err != nil {
 		return fmt.Errorf("failed to SetPurposeOfConversation: %w", err)
 	}
@@ -405,7 +402,7 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		Blocks: slack.Blocks{BlockSet: blocks.IncidentRecovered(userID, incident.HandlerUserID)},
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionAttachments(attachment),
 	)
@@ -426,18 +423,18 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 	}
 
 	for _, c := range h.repository.AnnouncementChannels(h.ctx) {
-		cinfo, err := h.slackRepository.GetChannelByName(c)
+		cinfo, err := h.repository.GetChannelByName(c)
 		if err != nil {
 			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
 		}
 		if cinfo == nil {
 			continue
 		}
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			cinfo.ID,
 			slack.MsgOptionAttachments(attachment),
 		)
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
 		)
@@ -462,7 +459,7 @@ func (h *CallbackHandler) stopTimeKeeper(channelID, userID string) error {
 		return fmt.Errorf("failed to SaveIncident: %w", err)
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.TimeKeeperStopped(userID)...),
 	)
@@ -519,24 +516,24 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 		},
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.IncidentLevelChanged(userID, description)...),
 	)
 
 	for _, c := range h.repository.AnnouncementChannels(h.ctx) {
-		cinfo, err := h.slackRepository.GetChannelByName(c)
+		cinfo, err := h.repository.GetChannelByName(c)
 		if err != nil {
 			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
 		}
 		if cinfo == nil {
 			continue
 		}
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			cinfo.ID,
 			slack.MsgOptionAttachments(qttachment),
 		)
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
 		)
@@ -547,7 +544,7 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 // インシデントレベルの選択肢を提供する
 func (h *CallbackHandler) showIncidentLevelButtons(channelID string) {
 	levels := h.repository.IncidentLevels(h.ctx)
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.IncidentLevelButtons(levels)...),
 	)
@@ -561,14 +558,14 @@ func (h *CallbackHandler) showPostMortemButton(channelID string) error {
 	}
 
 	if incident.RecoveredAt.IsZero() {
-		h.slackRepository.PostMessage(
+		h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText("⛔️まだインシデントが復旧していません", false),
 		)
 		return nil
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.PostMortemButton()...),
 	)
@@ -582,27 +579,35 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
 	}
 
+	if incident.PostMortemURL != "" {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("⛔️ポストモーテムは既に作成されています", false),
+		)
+		return nil
+	}
+
 	createdAt := incident.StartedAt
 	recoveredAt := incident.RecoveredAt
 
-	author := h.slackRepository.GetUserPreferredName(&user)
+	author := h.repository.GetUserPreferredName(&user)
 
-	createdUser, err := h.slackRepository.GetUserByID(incident.CreatedUserID)
+	createdUser, err := h.repository.GetUserByID(incident.CreatedUserID)
 	if err != nil {
 		return fmt.Errorf("failed to GetUserByID: %w", err)
 	}
 
-	recoveredUser, err := h.slackRepository.GetUserByID(incident.RecoveredUserID)
+	recoveredUser, err := h.repository.GetUserByID(incident.RecoveredUserID)
 	if err != nil {
 		return fmt.Errorf("failed to GetUserByID: %w", err)
 	}
 
-	pinnedMessages, err := h.slackRepository.GetPinnedMessages(channel.ID)
+	pinnedMessages, err := h.repository.GetPinnedMessages(channel.ID)
 	if err != nil {
 		return fmt.Errorf("failed to GetPinnedMessages: %w", err)
 	}
 
-	formattedMessages := fmt.Sprintf("- %s %sさんがインシデントチャンネルを作成しました\n", createdAt.Format("2006-01-02 15:04:05"), h.slackRepository.GetUserPreferredName(createdUser))
+	formattedMessages := fmt.Sprintf("- %s %sさんがインシデントチャンネルを作成しました\n", createdAt.Format("2006-01-02 15:04:05"), h.repository.GetUserPreferredName(createdUser))
 	// - yyyy-MM-dd HH:mm:ss messageの形式でメッセージを取得
 
 	type message struct {
@@ -619,11 +624,11 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 			return fmt.Errorf("failed to parseSlackTimestamp: %w", err)
 		}
 		if userCache[m.User] == "" {
-			user, err := h.slackRepository.GetUserByID(m.User)
+			user, err := h.repository.GetUserByID(m.User)
 			if err != nil {
 				return fmt.Errorf("failed to GetUserByID: %w", err)
 			}
-			userCache[m.User] = h.slackRepository.GetUserPreferredName(user)
+			userCache[m.User] = h.repository.GetUserPreferredName(user)
 		}
 		messages = append(messages, message{
 			ts:   ts,
@@ -640,7 +645,7 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	for _, m := range messages {
 		formattedMessages += fmt.Sprintf("- %s %s:%s\n", m.ts.Format("2006-01-02 15:04:05"), m.user, m.text)
 	}
-	formattedMessages += fmt.Sprintf("- %s %sさんがインシデントを復旧を宣言\n", recoveredAt.Format("2006-01-02 15:04:05"), h.slackRepository.GetUserPreferredName(recoveredUser))
+	formattedMessages += fmt.Sprintf("- %s %sさんがインシデントを復旧を宣言\n", recoveredAt.Format("2006-01-02 15:04:05"), h.repository.GetUserPreferredName(recoveredUser))
 
 	channelURL := fmt.Sprintf("%sarchives/%s", h.workSpaceURL, channel.ID)
 	title := "例: サービスAPIが応答停止"
@@ -672,13 +677,14 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		incident.PostMortemURL = url
 	} else {
 		// アップロードする
-		err = h.slackRepository.UploadFile(channel.ID, postmortemFileTitle, title, rendered)
+		url, err := h.repository.UploadFile(h.workSpaceURL, user.ID, channel.ID, postmortemFileTitle, title, rendered)
 		if err != nil {
 			return fmt.Errorf("failed to UploadFile: %w", err)
 		}
+		incident.PostMortemURL = url
 	}
 
-	h.slackRepository.PostMessage(
+	h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionText("✅️ポストモーテムを作成しました", false),
 	)

@@ -6,43 +6,51 @@ import (
 	"github.com/pyama86/YAS3/domain/entity"
 )
 
-type IncidentRepository interface {
+type IncidentRepositoryer interface {
 	FindIncidentByChannel(context.Context, string) (*entity.Incident, error)
 	SaveIncident(context.Context, *entity.Incident) error
 	ActiveIncidents(context.Context) ([]entity.Incident, error)
 }
 
-type ServiceRepository interface {
+type ServiceRepositoryer interface {
 	Services(context.Context) ([]entity.Service, error)
 	ServiceByID(context.Context, int) (*entity.Service, error)
 	AnnouncementChannels(context.Context) []string
 }
 
-type IncidentLevelRepository interface {
+type IncidentLevelRepositoryer interface {
 	IncidentLevels(context.Context) []entity.IncidentLevel
 	IncidentLevelByLevel(context.Context, int) (*entity.IncidentLevel, error)
 }
 
 type Repository interface {
-	IncidentRepository
-	ServiceRepository
-	IncidentLevelRepository
+	IncidentRepositoryer
+	ServiceRepositoryer
+	IncidentLevelRepositoryer
+	SlackRepositoryer
 }
 
 type RepositoryFacade struct {
-	IncidentRepository
-	ServiceRepository
-	IncidentLevelRepository
+	IncidentRepositoryer
+	ServiceRepositoryer
+	IncidentLevelRepositoryer
+	SlackRepositoryer
 }
 
-type PostMortemExporter interface {
+type PostMortemRepositoryer interface {
 	ExportPostMortem(context.Context, string, string) (string, error)
 }
 
-func NewRepository(incidentRepository IncidentRepository, serviceRepository ServiceRepository, incidentLevelRepository IncidentLevelRepository) Repository {
+func NewRepository(
+	incidentRepository IncidentRepositoryer,
+	serviceRepository ServiceRepositoryer,
+	incidentLevelRepository IncidentLevelRepositoryer,
+	slackRepository SlackRepositoryer,
+) Repository {
 	return RepositoryFacade{
-		IncidentRepository:      incidentRepository,
-		ServiceRepository:       serviceRepository,
-		IncidentLevelRepository: incidentLevelRepository,
+		IncidentRepositoryer:      incidentRepository,
+		ServiceRepositoryer:       serviceRepository,
+		IncidentLevelRepositoryer: incidentLevelRepository,
+		SlackRepositoryer:         slackRepository,
 	}
 }

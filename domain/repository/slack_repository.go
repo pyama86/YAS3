@@ -14,6 +14,25 @@ import (
 
 var ErrSlackNotFound = fmt.Errorf("not found")
 
+type SlackRepositoryer interface {
+	GetUserByID(id string) (*slack.User, error)
+	GetSlackID(name string) (string, error)
+	GetChannelByID(channelID string) (*slack.Channel, error)
+	GetChannelByName(name string) (*slack.Channel, error)
+	PostMessage(channelID string, opts ...slack.MsgOption)
+	UpdateMessage(channelID, ts string, opts ...slack.MsgOption)
+	DeleteMessage(channelID, ts string)
+	GetMemberIDs(name string) ([]string, error)
+	OpenView(triggerID string, view slack.ModalViewRequest) error
+	CreateConversation(params slack.CreateConversationParams) (*slack.Channel, error)
+	SetTopicOfConversation(channelID, topic string) error
+	InviteUsersToConversation(channelID string, users ...string) error
+	GetPinnedMessages(channelID string) ([]slack.Message, error)
+	GetUserPreferredName(user *slack.User) string
+	UploadFile(workspackeURL, userID, channelID, filename, title, content string) (string, error)
+	FlushChannelCache()
+}
+
 type SlackRepository struct {
 	client        *slack.Client
 	channelsCache *ttlcache.Cache[string, []slack.Channel]
@@ -340,8 +359,8 @@ func (h *SlackRepository) GetUserPreferredName(user *slack.User) string {
 	}
 	return user.Name
 }
-func (h *SlackRepository) UploadFile(channelID, filename, title, content string) error {
-	_, err := h.client.UploadFileV2(slack.UploadFileV2Parameters{
+func (h *SlackRepository) UploadFile(workspackeURL, userID, channelID, filename, title, content string) (string, error) {
+	f, err := h.client.UploadFileV2(slack.UploadFileV2Parameters{
 		Channel:  channelID,
 		Filename: filename,
 		Title:    title,
@@ -350,7 +369,7 @@ func (h *SlackRepository) UploadFile(channelID, filename, title, content string)
 		FileSize: len(content),
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return fmt.Sprintf("%s/files/%s/%s", workspackeURL, userID, f.ID), nil
 }

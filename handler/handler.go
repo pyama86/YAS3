@@ -48,14 +48,14 @@ func Handle(ctx context.Context, configPath string) error {
 
 	slackRepository := repository.NewSlackRepository(webApi)
 
-	airtableRepository, err := repository.NewAIRepository()
+	aiRepository, err := repository.NewAIRepository()
 	if err != nil {
 		return err
 	}
 
-	repo := repository.NewRepository(dynamoRepository, cfgRepository, cfgRepository)
+	repo := repository.NewRepository(dynamoRepository, cfgRepository, cfgRepository, slackRepository)
 
-	var postmortemExporter repository.PostMortemExporter
+	var postmortemExporter repository.PostMortemRepositoryer
 	if os.Getenv("CONFLUENCE_USERNAME") != "" && os.Getenv("CONFLUENCE_PASSWORD") != "" && cfgRepository.Confluence.Domain != "" {
 		r, err := repository.NewConfluenceRepository(
 			cfgRepository.Confluence.Domain,
@@ -79,10 +79,9 @@ func Handle(ctx context.Context, configPath string) error {
 	callbackHandler := NewCallbackHandler(
 		ctx,
 		repo,
-		slackRepository,
-		airtableRepository,
-		postmortemExporter,
 		workSpaceURL,
+		aiRepository,
+		postmortemExporter,
 	)
 
 	// 15分ごとにインシデントチャンネルに通知を行う
