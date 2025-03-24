@@ -117,7 +117,9 @@ func (h *SlackRepository) getUserGroups() ([]slack.UserGroup, error) {
 	if groups := h.groupsCache.Get(cacheKey); groups != nil {
 		return groups.Value(), nil
 	}
-	groups, err := h.client.GetUserGroups()
+	groups, err := h.client.GetUserGroups(
+		slack.GetUserGroupsOptionIncludeUsers(true),
+	)
 	if err != nil {
 		return nil, err
 	}
