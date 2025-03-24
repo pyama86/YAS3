@@ -686,7 +686,7 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 
 	h.repository.PostMessage(
 		channel.ID,
-		slack.MsgOptionText("✅️ポストモーテムを作成しました", false),
+		slack.MsgOptionText(fmt.Sprintf("✅️ポストモーテムを作成しました: %s", incident.PostMortemURL), false),
 	)
 
 	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {

@@ -1,10 +1,10 @@
 .PHONY: lint fmt ci test devdeps
 LINTER := golangci-lint
 build:
-	go build -o bin/yas3 .
+	go build -tags viper_bind_struct -o bin/yas3 .
 ci: devdeps lint test
 run:
-	go run . --config example/yas3.toml
+	go run -tags viper_bind_struct . --config example/yas3.toml
 
 lint:
 	@echo ">> Running linter ($(LINTER))"

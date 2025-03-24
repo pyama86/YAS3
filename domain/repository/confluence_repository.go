@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/microcosm-cc/bluemonday"
+	"github.com/russross/blackfriday/v2"
 	goconfluence "github.com/virtomize/confluence-go-api"
 )
 
@@ -11,6 +13,7 @@ type ConfluenceRepository struct {
 	ansectorID string
 	spaceKey   string
 	client     *goconfluence.API
+	domain     string
 }
 
 func NewConfluenceRepository(domain, user, password, spaceKey, ancestorID string) (*ConfluenceRepository, error) {
@@ -26,16 +29,23 @@ func NewConfluenceRepository(domain, user, password, spaceKey, ancestorID string
 		ansectorID: ancestorID,
 		spaceKey:   spaceKey,
 		client:     api,
+		domain:     domain,
 	}, nil
 }
 
 func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body string) (string, error) {
+	renderer := blackfriday.NewHTMLRenderer(blackfriday.HTMLRendererParameters{
+		Flags: blackfriday.HrefTargetBlank,
+	})
+	output := blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.HardLineBreak+blackfriday.Autolink), blackfriday.WithRenderer(renderer))
+	html := bluemonday.UGCPolicy().SanitizeBytes(output)
+
 	data := &goconfluence.Content{
 		Type:  "page",
 		Title: title,
 		Body: goconfluence.Body{
 			Storage: goconfluence.Storage{
-				Value:          body,
+				Value:          string(html),
 				Representation: "storage",
 			},
 		},
@@ -60,5 +70,5 @@ func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body
 		return "", fmt.Errorf("failed to create confluence page: %w", err)
 	}
 
-	return page.Links.WebUI, nil
+	return fmt.Sprintf("https://%s.atlassian.net/wiki%s", c.domain, page.Links.WebUI), nil
 }
