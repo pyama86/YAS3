@@ -14,7 +14,7 @@ var UrgencyMap = map[string]string{
 	"critical": "🚨 緊急の対応を要する",
 }
 
-func CreateIncident(channelName string, services []entity.Service) slack.Blocks {
+func CreateIncident(services []entity.Service) slack.Blocks {
 	serviceOptions := make([]*slack.OptionBlockObject, 0, len(services))
 	for _, service := range services {
 		serviceOptions = append(serviceOptions, slack.NewOptionBlockObject(
@@ -33,26 +33,6 @@ func CreateIncident(channelName string, services []entity.Service) slack.Blocks 
 
 	return slack.Blocks{
 		BlockSet: []slack.Block{
-			// チャンネル名
-			&slack.InputBlock{
-				Type:    slack.MBTInput,
-				BlockID: "channel_name_block",
-				Label: &slack.TextBlockObject{
-					Type: "plain_text",
-					Text: "✏️ チャンネル名",
-				},
-				Element: &slack.PlainTextInputBlockElement{
-					Type:         slack.METPlainTextInput,
-					ActionID:     "channel_name_text",
-					InitialValue: channelName,
-					Placeholder: slack.NewTextBlockObject(
-						"plain_text", "例: incident-2021-01-01", false, false,
-					),
-				},
-				Optional: false,
-			},
-			slack.NewDividerBlock(),
-
 			// サービス
 			&slack.InputBlock{
 				Type:    slack.MBTInput,
