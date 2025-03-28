@@ -193,23 +193,13 @@ func (h *CallbackHandler) openIncidentModal(triggerID, channelID string) error {
 		return err
 	}
 
-	channelInfo, err := h.repository.GetChannelByID(channelID)
-	if err != nil {
-		return err
-	}
-
-	channelName := fmt.Sprintf("%s-%s", channelInfo.Name, timeNow().Format("2006-01-02"))
-	if h.config != nil && h.config.ChannelPrefix != "" {
-		channelName = fmt.Sprintf("%s%s", h.config.ChannelPrefix, channelName)
-	}
-
 	view := slack.ModalViewRequest{
 		Type:            slack.ViewType("modal"),
 		Title:           titleText,
 		CallbackID:      "incident_modal",
 		Submit:          submitText,
 		Close:           closeText,
-		Blocks:          blocks.CreateIncident(channelName, services),
+		Blocks:          blocks.CreateIncident(services),
 		PrivateMetadata: channelID,
 	}
 
@@ -224,13 +214,29 @@ func (h *CallbackHandler) openIncidentModal(triggerID, channelID string) error {
 func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallback) error {
 	serviceID := callback.View.State.Values["service_block"]["service_select"].SelectedOption.Value
 	summaryText := callback.View.State.Values["incident_summary_block"]["summary_text"].Value
-	channelName := callback.View.State.Values["channel_name_block"]["channel_name_text"].Value
 	urgency := callback.View.State.Values["urgency_block"]["urgency_select"].SelectedOption.Value
 	userID := callback.User.ID
 
-	slog.Info("submitIncidentModal", slog.Any("serviceID", serviceID), slog.Any("summary_text", summaryText), slog.Any("channelName", channelName), slog.Any("urgency", urgency))
+	slog.Info("submitIncidentModal", slog.Any("serviceID", serviceID), slog.Any("summary_text", summaryText), slog.Any("urgency", urgency))
 
 	// チャンネル作成
+	num, err := strconv.Atoi(serviceID)
+	if err != nil {
+		return fmt.Errorf("failed to strconv.Atoi: %w", err)
+	}
+
+	service, err := h.repository.ServiceByID(h.ctx, num)
+	if err != nil {
+		return fmt.Errorf("failed to ServiceByID: %w", err)
+	}
+
+	prefix := ""
+	if h.config != nil && h.config.ChannelPrefix != "" {
+		prefix = h.config.ChannelPrefix
+	}
+	channelName := fmt.Sprintf("%s%s-%s", prefix, service.Name, timeNow().Format("2006-01-02"))
+
+	// すでに存在する場合はユニークな名前にする
 	c, err := h.repository.GetChannelByName(channelName)
 	if err != nil && err != repository.ErrSlackNotFound {
 		return fmt.Errorf("failed to GetChannelByID: %w", err)
@@ -238,10 +244,10 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	if c != nil {
 		channelName = fmt.Sprintf("%s-%02d", channelName, timeNow().Unix()%100)
 	}
-
 	channel, err := h.repository.CreateConversation(slack.CreateConversationParams{
 		ChannelName: channelName,
 	})
+
 	if err != nil {
 		h.repository.PostMessage(
 			callback.Channel.ID,
@@ -251,11 +257,6 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		return fmt.Errorf("failed to CreateConversation: %w", err)
 	}
 	h.repository.FlushChannelCache()
-	num, err := strconv.Atoi(serviceID)
-	if err != nil {
-		return fmt.Errorf("failed to strconv.Atoi: %w", err)
-	}
-
 	// インシデントを保存する
 	incident := &entity.Incident{
 		ChannelID:     channel.ID,
@@ -269,11 +270,6 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	}
 	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
 		return fmt.Errorf("failed to SaveIncident: %w", err)
-	}
-
-	service, err := h.repository.ServiceByID(h.ctx, num)
-	if err != nil {
-		return fmt.Errorf("failed to ServiceByID: %w", err)
 	}
 
 	urgencyText, ok := blocks.UrgencyMap[urgency]
