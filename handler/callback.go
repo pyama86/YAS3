@@ -30,6 +30,7 @@ type CallbackHandler struct {
 	workSpaceURL       string
 	aiRepository       *repository.AIRepository
 	postmortemExporter repository.PostMortemRepositoryer
+	config             *repository.Config
 }
 
 var urgencyColorMap = map[string]string{
@@ -45,6 +46,7 @@ func NewCallbackHandler(
 	workSpaceURL string,
 	aiRepository *repository.AIRepository,
 	postmortemExporter repository.PostMortemRepositoryer,
+	config *repository.Config,
 ) *CallbackHandler {
 	return &CallbackHandler{
 		ctx:                ctx,
@@ -52,6 +54,7 @@ func NewCallbackHandler(
 		aiRepository:       aiRepository,
 		workSpaceURL:       workSpaceURL,
 		postmortemExporter: postmortemExporter,
+		config:             config,
 	}
 }
 
@@ -196,6 +199,9 @@ func (h *CallbackHandler) openIncidentModal(triggerID, channelID string) error {
 	}
 
 	channelName := fmt.Sprintf("%s-%s", channelInfo.Name, timeNow().Format("2006-01-02"))
+	if h.config != nil && h.config.ChannelPrefix != "" {
+		channelName = fmt.Sprintf("%s%s", h.config.ChannelPrefix, channelName)
+	}
 
 	view := slack.ModalViewRequest{
 		Type:            slack.ViewType("modal"),
@@ -323,23 +329,8 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	)
 
 	// 共有チャンネルにお知らせを投稿
-	for _, c := range h.repository.AnnouncementChannels(h.ctx) {
-		cinfo, err := h.repository.GetChannelByName(c)
-		if err != nil {
-			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
-		}
-		if cinfo == nil {
-			continue
-		}
-
-		h.repository.PostMessage(
-			cinfo.ID,
-			slack.MsgOptionAttachments(attachment),
-		)
-		h.repository.PostMessage(
-			channel.ID,
-			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
-		)
+	if err := h.broadCastAnnouncement(channel.ID, attachment); err != nil {
+		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
 
 	h.repository.PostMessage(
@@ -422,22 +413,8 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		)},
 	}
 
-	for _, c := range h.repository.AnnouncementChannels(h.ctx) {
-		cinfo, err := h.repository.GetChannelByName(c)
-		if err != nil {
-			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
-		}
-		if cinfo == nil {
-			continue
-		}
-		h.repository.PostMessage(
-			cinfo.ID,
-			slack.MsgOptionAttachments(attachment),
-		)
-		h.repository.PostMessage(
-			channelID,
-			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
-		)
+	if err := h.broadCastAnnouncement(channelID, attachment); err != nil {
+		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
 
 	return nil
@@ -504,7 +481,7 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 	if levelInt > 0 {
 		color = "#f2c744"
 	}
-	qttachment := slack.Attachment{
+	attachment := slack.Attachment{
 		Color: color,
 		Blocks: slack.Blocks{
 			BlockSet: blocks.IncidentLevelUpdated(
@@ -521,23 +498,10 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 		slack.MsgOptionBlocks(blocks.IncidentLevelChanged(userID, description)...),
 	)
 
-	for _, c := range h.repository.AnnouncementChannels(h.ctx) {
-		cinfo, err := h.repository.GetChannelByName(c)
-		if err != nil {
-			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
-		}
-		if cinfo == nil {
-			continue
-		}
-		h.repository.PostMessage(
-			cinfo.ID,
-			slack.MsgOptionAttachments(qttachment),
-		)
-		h.repository.PostMessage(
-			channelID,
-			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
-		)
+	if err := h.broadCastAnnouncement(channelID, attachment); err != nil {
+		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
+
 	return nil
 }
 
@@ -718,4 +682,29 @@ func parseSlackTimestamp(ts string) (time.Time, error) {
 	}
 
 	return time.Unix(sec, nsec).In(loc), nil
+}
+
+func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment slack.Attachment) error {
+	if h.config == nil || len(h.config.AnnouncementChannels) == 0 {
+		return nil
+	}
+	for _, c := range h.config.AnnouncementChannels {
+		cinfo, err := h.repository.GetChannelByName(c)
+		if err != nil {
+			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
+		}
+		if cinfo == nil {
+			continue
+		}
+
+		h.repository.PostMessage(
+			cinfo.ID,
+			slack.MsgOptionAttachments(attachment),
+		)
+		h.repository.PostMessage(
+			channelID,
+			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
+		)
+	}
+	return nil
 }

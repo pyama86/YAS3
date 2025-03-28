@@ -15,7 +15,6 @@ type IncidentRepositoryer interface {
 type ServiceRepositoryer interface {
 	Services(context.Context) ([]entity.Service, error)
 	ServiceByID(context.Context, int) (*entity.Service, error)
-	AnnouncementChannels(context.Context) []string
 }
 
 type IncidentLevelRepositoryer interface {

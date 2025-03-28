@@ -82,6 +82,7 @@ func Handle(ctx context.Context, configPath string) error {
 		workSpaceURL,
 		aiRepository,
 		postmortemExporter,
+		cfgRepository,
 	)
 
 	// 15分ごとにインシデントチャンネルに通知を行う
