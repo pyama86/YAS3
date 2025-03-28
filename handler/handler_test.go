@@ -343,7 +343,7 @@ func TestCallbackHandler_Handle(t *testing.T) {
 		announce: []string{"ANN"},
 	}
 	repo := repository.NewRepository(incRepo, cfgRepo, cfgRepo, repository.NewSlackRepository(api))
-	cbHandler := handler.NewCallbackHandler(context.Background(), repo, "https://example.com/", nil, nil)
+	cbHandler := handler.NewCallbackHandler(context.Background(), repo, "https://example.com/", nil, nil, nil)
 
 	tcs := []struct {
 		name    string

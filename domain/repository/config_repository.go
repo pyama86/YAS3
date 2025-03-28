@@ -36,10 +36,11 @@ func NewConfigRepository(path string) (*Config, error) {
 }
 
 type Config struct {
-	ServiceList             []entity.Service       `mapstructure:"services" validate:"required"`
-	AnnouncementChannelList []string               `mapstructure:"announcement_channels"`
-	IncidentLevelList       []entity.IncidentLevel `mapstructure:"incident_levels" validate:"required"`
-	Confluence              ConfluenceConfig       `mapstructure:"confluence"`
+	ServiceList          []entity.Service       `mapstructure:"services" validate:"required"`
+	AnnouncementChannels []string               `mapstructure:"announcement_channels"`
+	ChannelPrefix        string                 `mapstructure:"channel_prefix"`
+	IncidentLevelList    []entity.IncidentLevel `mapstructure:"incident_levels" validate:"required"`
+	Confluence           ConfluenceConfig       `mapstructure:"confluence"`
 }
 
 type ConfluenceConfig struct {
@@ -66,10 +67,6 @@ func (c *Config) ServiceByID(_ context.Context, id int) (*entity.Service, error)
 		}
 	}
 	return nil, fmt.Errorf("service not found")
-}
-
-func (c *Config) AnnouncementChannels(_ context.Context) []string {
-	return c.AnnouncementChannelList
 }
 
 func (c *Config) IncidentLevels(_ context.Context) []entity.IncidentLevel {
