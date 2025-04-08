@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -51,6 +52,31 @@ func NewSlackRepository(client *slack.Client) *SlackRepository {
 	go r.channelsCache.Start()
 	go r.usersCache.Start()
 	go r.groupsCache.Start()
+
+	// 失効時は自動で更新する
+	r.channelsCache.OnEviction(func(ctx context.Context, _ ttlcache.EvictionReason, _ *ttlcache.Item[string, []slack.Channel]) {
+		slog.Info("Refreshing channels cache")
+		_, err := r.getChannels()
+		if err != nil {
+			slog.Error("Failed to refresh channels cache", slog.Any("err", err))
+		}
+	})
+
+	r.usersCache.OnEviction(func(ctx context.Context, _ ttlcache.EvictionReason, _ *ttlcache.Item[string, []slack.User]) {
+		slog.Info("Refreshing users cache")
+		_, err := r.getUsers()
+		if err != nil {
+			slog.Error("Failed to refresh users cache", slog.Any("err", err))
+		}
+	})
+
+	r.groupsCache.OnEviction(func(ctx context.Context, _ ttlcache.EvictionReason, _ *ttlcache.Item[string, []slack.UserGroup]) {
+		slog.Info("Refreshing groups cache")
+		_, err := r.getUserGroups()
+		if err != nil {
+			slog.Error("Failed to refresh groups cache", slog.Any("err", err))
+		}
+	})
 	return r
 }
 
