@@ -332,10 +332,10 @@ func TestCallbackHandler_Handle(t *testing.T) {
 
 	api := slack.New("dummy", slack.OptionAPIURL(srv.GetAPIURL()))
 	incRepo := &mockIncidentRepo{data: map[string]*entity.Incident{
-		"CINC":  {ChannelID: "CINC", ServiceID: 1},
-		"CNINC": {ChannelID: "CNINC", ServiceID: 1},
-		"CDUM":  {ChannelID: "CDUM", ServiceID: 1},
-		"CFROM": {ChannelID: "CFROM", ServiceID: 1},
+		"CINC":  {ChannelID: "CINC", ServiceID: 1, Urgency: "none"},
+		"CNINC": {ChannelID: "CNINC", ServiceID: 1, Urgency: "none"},
+		"CDUM":  {ChannelID: "CDUM", ServiceID: 1, Urgency: "none"},
+		"CFROM": {ChannelID: "CFROM", ServiceID: 1, Urgency: "none"},
 	}}
 	cfgRepo := &mockConfigRepo{
 		services: []entity.Service{{ID: 1, Name: "svc"}},
@@ -469,6 +469,31 @@ func TestCallbackHandler_Handle(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "in_channel_options => edit_incident_summary => openView & update (CINC)",
+			cb: slack.InteractionCallback{
+				Type:      slack.InteractionTypeBlockActions,
+				TriggerID: "dummy-trigger",
+				Channel: slack.Channel{
+					GroupConversation: slack.GroupConversation{
+						Conversation: slack.Conversation{ID: "CINC"},
+					},
+				},
+				Message: slack.Message{
+					Msg: slack.Msg{Timestamp: "777.888"},
+				},
+				User: slack.User{ID: "UEDIT"},
+				ActionCallback: slack.ActionCallbacks{
+					BlockActions: []*slack.BlockAction{
+						{
+							ActionID:       "in_channel_options",
+							SelectedOption: slack.OptionBlockObject{Value: "edit_incident_summary"},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "ViewSubmission => incident_modal => ok (CFROM)",
 			cb: slack.InteractionCallback{
 				Type:      slack.InteractionTypeViewSubmission,
@@ -498,6 +523,26 @@ func TestCallbackHandler_Handle(t *testing.T) {
 						Conversation: slack.Conversation{ID: "CFROM"},
 					},
 				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "ViewSubmission => edit_summary_modal => ok (CINC)",
+			cb: slack.InteractionCallback{
+				Type:      slack.InteractionTypeViewSubmission,
+				TriggerID: "dummy-trigger",
+				View: slack.View{
+					CallbackID:      "edit_summary_modal",
+					PrivateMetadata: "CINC",
+					State: &slack.ViewState{
+						Values: map[string]map[string]slack.BlockAction{
+							"edit_summary_block": {
+								"summary_text": {Value: "更新された事象内容"},
+							},
+						},
+					},
+				},
+				User: slack.User{ID: "UEDIT"},
 			},
 			wantErr: false,
 		},
