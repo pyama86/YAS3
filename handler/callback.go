@@ -139,6 +139,11 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 			case "set_incident_level":
 				slog.Info("set_incident_level", slog.Any("channelID", callback.Channel.ID))
 				h.showIncidentLevelButtons(callback.Channel.ID)
+			case "edit_incident_summary":
+				slog.Info("edit_incident_summary", slog.Any("channelID", callback.Channel.ID))
+				if err := h.openEditSummaryModal(callback.TriggerID, callback.Channel.ID); err != nil {
+					return fmt.Errorf("openEditSummaryModal failed: %w", err)
+				}
 			case "create_postmortem":
 				slog.Info("create_postmortem", slog.Any("channelID", callback.Channel.ID))
 				if err := h.showPostMortemButton(callback.Channel.ID); err != nil {
@@ -152,6 +157,10 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 		case "incident_modal":
 			if err := h.submitIncidentModal(callback); err != nil {
 				return fmt.Errorf("submitIncidentModal failed: %w", err)
+			}
+		case "edit_summary_modal":
+			if err := h.submitEditSummaryModal(callback); err != nil {
+				return fmt.Errorf("submitEditSummaryModal failed: %w", err)
 			}
 		}
 	}
@@ -702,5 +711,100 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
 		)
 	}
+	return nil
+}
+
+// 事象内容編集用のモーダルを開く
+func (h *CallbackHandler) openEditSummaryModal(triggerID, channelID string) error {
+	titleText := slack.NewTextBlockObject("plain_text", "📝 事象内容の編集", false, false)
+	submitText := slack.NewTextBlockObject("plain_text", "✅ 更新", false, false)
+	closeText := slack.NewTextBlockObject("plain_text", "❌ キャンセル", false, false)
+
+	// 現在のインシデント情報を取得
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+
+	if incident == nil {
+		return fmt.Errorf("incident is nil")
+	}
+
+	view := slack.ModalViewRequest{
+		Type:            slack.ViewType("modal"),
+		Title:           titleText,
+		CallbackID:      "edit_summary_modal",
+		Submit:          submitText,
+		Close:           closeText,
+		Blocks:          blocks.EditIncidentSummary(incident.Description),
+		PrivateMetadata: channelID,
+	}
+
+	err = h.repository.OpenView(triggerID, view)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// 事象内容編集モーダルの送信処理
+func (h *CallbackHandler) submitEditSummaryModal(callback *slack.InteractionCallback) error {
+	channelID := callback.View.PrivateMetadata
+	summaryText := callback.View.State.Values["edit_summary_block"]["summary_text"].Value
+	userID := callback.User.ID
+
+	// インシデント情報を取得
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+
+	if incident == nil {
+		return fmt.Errorf("incident is nil")
+	}
+
+	// 古い事象内容を保存
+	oldSummary := incident.Description
+
+	// 新しい事象内容を設定
+	incident.Description = summaryText
+	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
+		return fmt.Errorf("failed to SaveIncident: %w", err)
+	}
+
+	// チャンネルのトピックも更新
+	channel, err := h.repository.GetChannelByID(channelID)
+	if err != nil {
+		return fmt.Errorf("failed to GetChannelByID: %w", err)
+	}
+
+	service, err := h.repository.ServiceByID(h.ctx, incident.ServiceID)
+	if err != nil {
+		return fmt.Errorf("failed to ServiceByID: %w", err)
+	}
+
+	urgencyText, ok := blocks.UrgencyMap[incident.Urgency]
+	if !ok {
+		return fmt.Errorf("invalid urgency: %s", incident.Urgency)
+	}
+
+	// トピックを更新（復旧済みの場合は【復旧】のプレフィックスを維持）
+	topic := fmt.Sprintf("サービス名:%s 緊急度:%s 事象内容:%s", service.Name, urgencyText, summaryText)
+	if strings.HasPrefix(channel.Topic.Value, "【復旧】") {
+		topic = fmt.Sprintf("【復旧】%s", topic)
+	}
+
+	err = h.repository.SetTopicOfConversation(channelID, topic)
+	if err != nil {
+		return fmt.Errorf("failed to SetTopicOfConversation: %w", err)
+	}
+
+	// 変更を通知
+	h.repository.PostMessage(
+		channelID,
+		slack.MsgOptionText(fmt.Sprintf("✅ <@%s>が事象内容を更新しました\n*変更前:* %s\n*変更後:* %s", userID, oldSummary, summaryText), false),
+	)
+
 	return nil
 }

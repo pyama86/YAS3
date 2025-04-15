@@ -20,6 +20,11 @@ func InChannelOptions() []*slack.OptionBlockObject {
 			nil,
 		),
 		slack.NewOptionBlockObject(
+			"edit_incident_summary",
+			slack.NewTextBlockObject("plain_text", "📝 事象内容を編集する", false, false),
+			nil,
+		),
+		slack.NewOptionBlockObject(
 			"create_postmortem",
 			slack.NewTextBlockObject("plain_text", "📝 ポストモーテムを作成する", false, false),
 			nil,
