@@ -18,12 +18,12 @@ var ErrSlackNotFound = fmt.Errorf("not found")
 type SlackRepositoryer interface {
 	GetUserByID(id string) (*slack.User, error)
 	GetSlackID(name string) (string, error)
-	GetChannelByID(channelID string) (*slack.Channel, error)
+	GetMemberIDs(name string) ([]string, error)
 	GetChannelByName(name string) (*slack.Channel, error)
+	GetChannelByID(channelID string) (*slack.Channel, error)
 	PostMessage(channelID string, opts ...slack.MsgOption)
 	UpdateMessage(channelID, ts string, opts ...slack.MsgOption)
 	DeleteMessage(channelID, ts string)
-	GetMemberIDs(name string) ([]string, error)
 	OpenView(triggerID string, view slack.ModalViewRequest) error
 	CreateConversation(params slack.CreateConversationParams) (*slack.Channel, error)
 	SetTopicOfConversation(channelID, topic string) error
@@ -35,24 +35,47 @@ type SlackRepositoryer interface {
 }
 
 type SlackRepository struct {
-	client        *slack.Client
-	channelsCache *ttlcache.Cache[string, []slack.Channel]
-	usersCache    *ttlcache.Cache[string, []slack.User]
-	groupsCache   *ttlcache.Cache[string, []slack.UserGroup]
+	client             *slack.Client
+	channelsCache      *ttlcache.Cache[string, []slack.Channel]
+	usersCache         *ttlcache.Cache[string, []slack.User]
+	groupsCache        *ttlcache.Cache[string, []slack.UserGroup]
+	userNameCache      *ttlcache.Cache[string, *slack.User]
+	userGroupNameCache *ttlcache.Cache[string, *slack.UserGroup]
 }
 
 func NewSlackRepository(client *slack.Client) *SlackRepository {
 
 	r := &SlackRepository{
-		client:        client,
-		channelsCache: ttlcache.New(ttlcache.WithTTL[string, []slack.Channel](time.Hour)),
-		usersCache:    ttlcache.New(ttlcache.WithTTL[string, []slack.User](time.Hour)),
-		groupsCache:   ttlcache.New(ttlcache.WithTTL[string, []slack.UserGroup](time.Hour)),
+		client:             client,
+		channelsCache:      ttlcache.New(ttlcache.WithTTL[string, []slack.Channel](time.Hour)),
+		usersCache:         ttlcache.New(ttlcache.WithTTL[string, []slack.User](time.Hour)),
+		groupsCache:        ttlcache.New(ttlcache.WithTTL[string, []slack.UserGroup](time.Hour)),
+		userNameCache:      ttlcache.New(ttlcache.WithTTL[string, *slack.User](time.Hour)),
+		userGroupNameCache: ttlcache.New(ttlcache.WithTTL[string, *slack.UserGroup](time.Hour)),
 	}
 	go r.channelsCache.Start()
 	go r.usersCache.Start()
 	go r.groupsCache.Start()
+	go r.userNameCache.Start()
+	go r.userGroupNameCache.Start()
 
+	go func() {
+		_, err := r.getChannels()
+		if err != nil {
+			slog.Error("Failed to get channels", slog.Any("err", err))
+		}
+		slog.Info("Channels cache initialized")
+		_, err = r.getUsers()
+		if err != nil {
+			slog.Error("Failed to get users", slog.Any("err", err))
+		}
+		slog.Info("Users cache initialized")
+		_, err = r.getUserGroups()
+		if err != nil {
+			slog.Error("Failed to get user groups", slog.Any("err", err))
+		}
+		slog.Info("User groups cache initialized")
+	}()
 	// 失効時は自動で更新する
 	r.channelsCache.OnEviction(func(ctx context.Context, _ ttlcache.EvictionReason, _ *ttlcache.Item[string, []slack.Channel]) {
 		slog.Info("Refreshing channels cache")
@@ -135,6 +158,13 @@ func (h *SlackRepository) getUsers() ([]slack.User, error) {
 		return nil, err
 	}
 	h.usersCache.Set(cacheKey, users, ttlcache.DefaultTTL)
+
+	for _, u := range users {
+		if u.Name != "" {
+			h.userNameCache.Set(u.Name, &u, ttlcache.DefaultTTL)
+		}
+	}
+
 	return users, nil
 }
 
@@ -150,6 +180,16 @@ func (h *SlackRepository) getUserGroups() ([]slack.UserGroup, error) {
 		return nil, err
 	}
 	h.groupsCache.Set(cacheKey, groups, ttlcache.DefaultTTL)
+
+	for _, g := range groups {
+		if g.Handle != "" {
+			h.userGroupNameCache.Set(g.Handle, &g, ttlcache.DefaultTTL)
+		}
+		if g.Name != "" {
+			h.userGroupNameCache.Set(g.Name, &g, ttlcache.DefaultTTL)
+		}
+	}
+
 	return groups, nil
 }
 
@@ -252,6 +292,13 @@ func (h *SlackRepository) DeleteMessage(channelID, ts string) {
 }
 
 func (h *SlackRepository) GetMemberIDs(name string) ([]string, error) {
+	if h.userNameCache.Get(name) != nil {
+		return []string{h.userNameCache.Get(name).Value().ID}, nil
+	}
+	if h.userGroupNameCache.Get(name) != nil {
+		return h.userGroupNameCache.Get(name).Value().Users, nil
+	}
+
 	users, err := h.getUsers()
 	if err != nil {
 		return nil, err
