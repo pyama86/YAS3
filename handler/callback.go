@@ -245,6 +245,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	}
 	channelName := fmt.Sprintf("%s%s-%s", prefix, service.Name, timeNow().Format("2006-01-02"))
 
+	slog.Info("get_channel_by_name", slog.Any("channelName", channelName))
 	// すでに存在する場合はユニークな名前にする
 	c, err := h.repository.GetChannelByName(channelName)
 	if err != nil && err != repository.ErrSlackNotFound {
@@ -253,6 +254,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	if c != nil {
 		channelName = fmt.Sprintf("%s-%02d", channelName, timeNow().Unix()%100)
 	}
+	slog.Info("create_conversation", slog.Any("channelName", channelName))
 	channel, err := h.repository.CreateConversation(slack.CreateConversationParams{
 		ChannelName: channelName,
 	})
@@ -277,6 +279,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		CreatedUserID: userID,
 		StartedAt:     timeNow(),
 	}
+	slog.Info("save_incident", slog.Any("incident", incident))
 	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
 		return fmt.Errorf("failed to SaveIncident: %w", err)
 	}
@@ -287,12 +290,14 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	}
 
 	topic := fmt.Sprintf("サービス名:%s 緊急度:%s 事象内容:%s", service.Name, urgencyText, summaryText)
+	slog.Info("set_topic_of_conversation", slog.Any("topic", topic))
 	err = h.repository.SetTopicOfConversation(channel.ID, topic)
 	if err != nil {
 		return fmt.Errorf("failed to SetPurposeOfConversation: %w", err)
 	}
 	var members []string
 	errMembers := []string{}
+	slog.Info("get incident_team_members", slog.Int("count", len(service.IncidentTeamMembers)))
 	for _, member := range service.IncidentTeamMembers {
 		memberIDs, err := h.repository.GetMemberIDs(member)
 		if err != nil {
@@ -306,6 +311,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	}
 
 	if len(members) > 0 {
+		slog.Info("invite_users_to_conversation", slog.Any("members", members))
 		err = h.repository.InviteUsersToConversation(channel.ID, members...)
 		if err != nil {
 			return fmt.Errorf("failed to InviteUsersToConversation: %w", err)
