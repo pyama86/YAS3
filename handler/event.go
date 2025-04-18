@@ -64,18 +64,34 @@ func (h *EventHandler) handleMetionEvent(event *slackevents.AppMentionEvent) err
 
 	// インシデントチャンネルではなければインシデント作成
 	if incident == nil {
+		msgOptions := []slack.MsgOption{
+			slack.MsgOptionBlocks(blocks.Opening()...),
+		}
+
+		if event.ThreadTimeStamp != "" {
+			msgOptions = append(msgOptions, slack.MsgOptionTS(event.ThreadTimeStamp))
+		}
+
 		_, _, err := h.client.PostMessage(
 			channelID,
-			slack.MsgOptionBlocks(blocks.Opening()...),
+			msgOptions...,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to PostEphemeral: %w", err)
 		}
 	} else {
+		msgOptions := []slack.MsgOption{
+			slack.MsgOptionBlocks(blocks.IncidentMenu()...),
+		}
+		if event.ThreadTimeStamp != "" {
+			msgOptions = append(msgOptions, slack.MsgOptionTS(event.ThreadTimeStamp))
+		}
+
 		_, _, err := h.client.PostMessage(
 			channelID,
-			slack.MsgOptionBlocks(blocks.IncidentMenu()...),
+			msgOptions...,
 		)
+
 		if err != nil {
 			return fmt.Errorf("failed to PostEphemeral: %w", err)
 		}
