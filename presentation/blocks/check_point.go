@@ -24,7 +24,7 @@ func CheckPoint(elapsedStr string) []slack.Block {
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject(
 				"mrkdwn",
-				":loudspeaker: *状況更新アナウンス*\n\nインシデントレベルの変更など状況に変化があれば、こちらで最新情報を共有してください。",
+				":loudspeaker: *状況更新アナウンス*\n\n事象内容やインシデントレベルの変更など状況に変化があれば、こちらで最新情報を共有してください。",
 				false,
 				false,
 			),
