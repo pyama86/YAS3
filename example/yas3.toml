@@ -1,9 +1,10 @@
-announcement_channels = ["all-pyama-dev"]
+global_announcement_channels = ["all-pyama-dev"]
 
 [[services]]
 id = 1
 name = "yas3"
 incident_team_members = ["pyama"]
+announcement_channels = ["yas3-alerts"]
 
 [[incident_levels]]
 level = 1

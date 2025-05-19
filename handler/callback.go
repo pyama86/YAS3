@@ -340,7 +340,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	)
 
 	// 共有チャンネルにお知らせを投稿
-	if err := h.broadCastAnnouncement(channel.ID, attachment); err != nil {
+	if err := h.broadCastAnnouncement(channel.ID, attachment, service); err != nil {
 		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
 
@@ -424,7 +424,7 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		)},
 	}
 
-	if err := h.broadCastAnnouncement(channelID, attachment); err != nil {
+	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
 		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
 
@@ -509,7 +509,7 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 		slack.MsgOptionBlocks(blocks.IncidentLevelChanged(userID, description)...),
 	)
 
-	if err := h.broadCastAnnouncement(channelID, attachment); err != nil {
+	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
 		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
 
@@ -695,14 +695,30 @@ func parseSlackTimestamp(ts string) (time.Time, error) {
 	return time.Unix(sec, nsec).In(loc), nil
 }
 
-func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment slack.Attachment) error {
-	if h.config == nil || len(h.config.AnnouncementChannels) == 0 {
-		return nil
+func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment slack.Attachment, service *entity.Service) error {
+	// アナウンスチャンネルをマージして重複を除去
+	channels := make(map[string]bool)
+
+	// サービス固有のアナウンスチャンネルを追加
+	if service != nil {
+		for _, c := range service.AnnouncementChannels {
+			channels[c] = true
+		}
 	}
-	for _, c := range h.config.AnnouncementChannels {
+
+	// グローバルアナウンスチャンネルを追加
+	if h.config != nil {
+		for _, c := range h.config.GetGlobalAnnouncementChannels(h.ctx) {
+			channels[c] = true
+		}
+	}
+
+	// マージしたチャンネルに通知
+	for c := range channels {
 		cinfo, err := h.repository.GetChannelByName(c)
 		if err != nil {
 			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
+			continue
 		}
 		if cinfo == nil {
 			continue
