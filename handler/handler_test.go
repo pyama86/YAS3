@@ -66,7 +66,7 @@ func (m *mockConfigRepo) ServiceByID(_ context.Context, id int) (*entity.Service
 	}
 	return nil, fmt.Errorf("not found")
 }
-func (m *mockConfigRepo) AnnouncementChannels(_ context.Context) []string {
+func (m *mockConfigRepo) GetGlobalAnnouncementChannels(_ context.Context) []string {
 	return m.announce
 }
 func (m *mockConfigRepo) IncidentLevels(_ context.Context) []entity.IncidentLevel {

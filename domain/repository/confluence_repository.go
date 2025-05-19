@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/microcosm-cc/bluemonday"
+	"github.com/pyama86/YAS3/domain/entity"
 	"github.com/russross/blackfriday/v2"
 	goconfluence "github.com/virtomize/confluence-go-api"
 )
@@ -33,12 +34,25 @@ func NewConfluenceRepository(domain, user, password, spaceKey, ancestorID string
 	}, nil
 }
 
-func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body string) (string, error) {
+func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body string, service *entity.Service) (string, error) {
 	renderer := blackfriday.NewHTMLRenderer(blackfriday.HTMLRendererParameters{
 		Flags: blackfriday.HrefTargetBlank,
 	})
 	output := blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.HardLineBreak+blackfriday.Autolink), blackfriday.WithRenderer(renderer))
 	html := bluemonday.UGCPolicy().SanitizeBytes(output)
+
+	// サービスのConfluence設定があれば使用し、なければデフォルト設定を使用
+	spaceKey := c.spaceKey
+	ancestorID := c.ansectorID
+
+	if service != nil && service.Confluence.Domain != "" {
+		if service.Confluence.Space != "" {
+			spaceKey = service.Confluence.Space
+		}
+		if service.Confluence.AncestorID != "" {
+			ancestorID = service.Confluence.AncestorID
+		}
+	}
 
 	data := &goconfluence.Content{
 		Type:  "page",
@@ -53,15 +67,15 @@ func (c *ConfluenceRepository) ExportPostMortem(ctx context.Context, title, body
 			Number: 1,
 		},
 	}
-	if c.ansectorID != "" {
+	if ancestorID != "" {
 		data.Ancestors = append(data.Ancestors, goconfluence.Ancestor{
-			ID: c.ansectorID,
+			ID: ancestorID,
 		})
 	}
 
-	if c.spaceKey != "" {
+	if spaceKey != "" {
 		data.Space = &goconfluence.Space{
-			Key: c.spaceKey,
+			Key: spaceKey,
 		}
 	}
 

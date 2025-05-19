@@ -36,17 +36,11 @@ func NewConfigRepository(path string) (*Config, error) {
 }
 
 type Config struct {
-	ServiceList          []entity.Service       `mapstructure:"services" validate:"required"`
-	AnnouncementChannels []string               `mapstructure:"announcement_channels"`
-	ChannelPrefix        string                 `mapstructure:"channel_prefix"`
-	IncidentLevelList    []entity.IncidentLevel `mapstructure:"incident_levels" validate:"required"`
-	Confluence           ConfluenceConfig       `mapstructure:"confluence"`
-}
-
-type ConfluenceConfig struct {
-	AncestorID string `mapstructure:"ancestor_id"`
-	Space      string `mapstructure:"space"`
-	Domain     string `mapstructure:"domain"`
+	ServiceList                []entity.Service        `mapstructure:"services" validate:"required"`
+	GlobalAnnouncementChannels []string                `mapstructure:"global_announcement_channels"`
+	ChannelPrefix              string                  `mapstructure:"channel_prefix"`
+	IncidentLevelList          []entity.IncidentLevel  `mapstructure:"incident_levels" validate:"required"`
+	DefaultConfluence          entity.ConfluenceConfig `mapstructure:"default_confluence"`
 }
 
 func (c *Config) Services(_ context.Context) ([]entity.Service, error) {
@@ -94,4 +88,8 @@ func (c *Config) IncidentLevelByLevel(_ context.Context, id int) (*entity.Incide
 		}
 	}
 	return nil, fmt.Errorf("incident level not found")
+}
+
+func (c *Config) GetGlobalAnnouncementChannels(_ context.Context) []string {
+	return c.GlobalAnnouncementChannels
 }
