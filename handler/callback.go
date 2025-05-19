@@ -645,7 +645,12 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	rendered := postmortem.Render(title, createdAt.Format("2006-01-02 15:04:05"), author, summary, formattedMessages, channelURL)
 
 	if h.postmortemExporter != nil {
-		url, err := h.postmortemExporter.ExportPostMortem(h.ctx, postmortemFileTitle, rendered)
+		service, err := h.repository.ServiceByID(h.ctx, incident.ServiceID)
+		if err != nil {
+			slog.Error("failed to ServiceByID", slog.Any("err", err), slog.Any("serviceID", incident.ServiceID))
+		}
+
+		url, err := h.postmortemExporter.ExportPostMortem(h.ctx, postmortemFileTitle, rendered, service)
 		if err != nil {
 			return fmt.Errorf("failed to ExportPostMortem: %w", err)
 		}

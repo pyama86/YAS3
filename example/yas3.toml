@@ -1,10 +1,16 @@
 global_announcement_channels = ["all-pyama-dev"]
 
+[default_confluence]
+domain = "example"
+space = "YAS3"
+ancestor_id = "12345"
+
 [[services]]
-id = 1
-name = "yas3"
-incident_team_members = ["pyama"]
-announcement_channels = ["yas3-alerts"]
+id                     = 1
+name                   = "yas3"
+incident_team_members  = ["pyama"]
+announcement_channels  = ["yas3-alerts"]
+confluence = { domain = "example", space = "YAS3-SERVICE1", ancestor_id = "67890" }
 
 [[incident_levels]]
 level = 1

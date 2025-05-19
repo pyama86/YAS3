@@ -37,7 +37,7 @@ type RepositoryFacade struct {
 }
 
 type PostMortemRepositoryer interface {
-	ExportPostMortem(context.Context, string, string) (string, error)
+	ExportPostMortem(context.Context, string, string, *entity.Service) (string, error)
 }
 
 func NewRepository(

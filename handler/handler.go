@@ -56,13 +56,13 @@ func Handle(ctx context.Context, configPath string) error {
 	repo := repository.NewRepository(dynamoRepository, cfgRepository, cfgRepository, slackRepository)
 
 	var postmortemExporter repository.PostMortemRepositoryer
-	if os.Getenv("CONFLUENCE_USERNAME") != "" && os.Getenv("CONFLUENCE_PASSWORD") != "" && cfgRepository.Confluence.Domain != "" {
+	if os.Getenv("CONFLUENCE_USERNAME") != "" && os.Getenv("CONFLUENCE_PASSWORD") != "" && cfgRepository.DefaultConfluence.Domain != "" {
 		r, err := repository.NewConfluenceRepository(
-			cfgRepository.Confluence.Domain,
+			cfgRepository.DefaultConfluence.Domain,
 			os.Getenv("CONFLUENCE_USERNAME"),
 			os.Getenv("CONFLUENCE_PASSWORD"),
-			cfgRepository.Confluence.Space,
-			cfgRepository.Confluence.AncestorID,
+			cfgRepository.DefaultConfluence.Space,
+			cfgRepository.DefaultConfluence.AncestorID,
 		)
 		if err != nil {
 			return err
