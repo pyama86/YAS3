@@ -256,6 +256,154 @@ func TestEventHandler_Handle(t *testing.T) {
 	}
 }
 
+// 障害概要編集時の周知チャンネル通知機能をテストする
+func TestEditIncidentSummaryNotification(t *testing.T) {
+	var postMsg []map[string]string
+
+	srv := slacktest.NewTestServer(func(c slacktest.Customize) {
+		c.Handle("/auth.test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"ok":true,"user_id":"UBOT"}`))
+		}))
+		c.Handle("/chat.postMessage", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			postMsg = append(postMsg, map[string]string{
+				"channel":     r.FormValue("channel"),
+				"blocks":      r.FormValue("blocks"),
+				"attachments": r.FormValue("attachments"),
+				"text":        r.FormValue("text"),
+			})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		c.Handle("/conversations.list", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp := struct {
+				OK       bool `json:"ok"`
+				Channels []struct {
+					ID         string `json:"id"`
+					Name       string `json:"name"`
+					IsArchived bool   `json:"is_archived"`
+				} `json:"channels"`
+			}{
+				OK: true,
+				Channels: []struct {
+					ID         string `json:"id"`
+					Name       string `json:"name"`
+					IsArchived bool   `json:"is_archived"`
+				}{
+					{ID: "CINC", Name: "incident-channel", IsArchived: false},
+					{ID: "CANN", Name: "announcement", IsArchived: false},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		c.Handle("/conversations.info", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			channelID := r.URL.Query().Get("channel")
+			resp := struct {
+				OK      bool `json:"ok"`
+				Channel struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Topic struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				} `json:"channel"`
+			}{
+				OK: true,
+				Channel: struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Topic struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				}{
+					ID:   channelID,
+					Name: "incident-channel",
+					Topic: struct {
+						Value string `json:"value"`
+					}{Value: "サービス名:test-service 緊急度:✅ サービスへの影響はない 事象内容:古い事象内容"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		c.Handle("/conversations.setTopic", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+	})
+	go srv.Start()
+	defer srv.Stop()
+
+	api := slack.New("dummy", slack.OptionAPIURL(srv.GetAPIURL()))
+	incRepo := &mockIncidentRepo{data: map[string]*entity.Incident{
+		"CINC": {
+			ChannelID:   "CINC",
+			ServiceID:   1,
+			Urgency:     "none",
+			Description: "古い事象内容",
+		},
+	}}
+	cfgRepo := &mockConfigRepo{
+		services: []entity.Service{{ID: 1, Name: "test-service", AnnouncementChannels: []string{"announcement"}}},
+		levels:   []entity.IncidentLevel{{Level: 0, Description: "サービス影響なし"}},
+		announce: []string{"announcement"},
+	}
+	repo := repository.NewRepository(incRepo, cfgRepo, cfgRepo, repository.NewSlackRepository(api))
+	cbHandler := handler.NewCallbackHandler(context.Background(), repo, "https://example.com/", nil, nil, nil)
+
+	// 障害概要編集のテスト
+	callback := slack.InteractionCallback{
+		Type:      slack.InteractionTypeViewSubmission,
+		TriggerID: "dummy-trigger",
+		View: slack.View{
+			CallbackID:      "edit_summary_modal",
+			PrivateMetadata: "CINC",
+			State: &slack.ViewState{
+				Values: map[string]map[string]slack.BlockAction{
+					"edit_summary_block": {
+						"summary_text": {Value: "新しい事象内容"},
+					},
+				},
+			},
+		},
+		User: slack.User{ID: "UEDIT"},
+	}
+
+	err := cbHandler.Handle(&callback)
+	require.NoError(t, err)
+
+	// 非同期処理の完了を待つ
+	time.Sleep(100 * time.Millisecond)
+
+	// メッセージが投稿されたことを確認
+	require.NotEmpty(t, postMsg)
+
+	// 基本的な動作確認
+	// 1. メッセージが複数投稿されていることを確認（インシデントチャンネル + 周知チャンネル）
+	assert.GreaterOrEqual(t, len(postMsg), 2)
+
+	// 2. インシデントチャンネルに何らかのメッセージが投稿されていることを確認
+	var hasIncChannelMsg bool
+	var hasAnnouncementMsg bool
+
+	for _, msg := range postMsg {
+		if msg["channel"] == "CINC" {
+			hasIncChannelMsg = true
+		}
+		if msg["channel"] == "CANN" {
+			hasAnnouncementMsg = true
+		}
+	}
+
+	assert.True(t, hasIncChannelMsg, "インシデントチャンネルにメッセージが投稿されていません")
+	assert.True(t, hasAnnouncementMsg, "周知チャンネルにメッセージが投稿されていません")
+
+	// インシデント情報が更新されたことを確認
+	updatedIncident := incRepo.data["CINC"]
+	assert.Equal(t, "新しい事象内容", updatedIncident.Description)
+}
+
 // -----------------------------------
 // callback.go : CallbackHandler
 // -----------------------------------
@@ -321,10 +469,45 @@ func TestCallbackHandler_Handle(t *testing.T) {
 					{ID: "CNINC", Name: "ninc", IsArchived: false},
 					{ID: "CFROM", Name: "fromchan", IsArchived: false},
 					{ID: "CDUM", Name: "dumchan", IsArchived: false},
+					{ID: "CANN", Name: "ANN", IsArchived: false},
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		c.Handle("/conversations.info", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			channelID := r.URL.Query().Get("channel")
+			resp := struct {
+				OK      bool `json:"ok"`
+				Channel struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Topic struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				} `json:"channel"`
+			}{
+				OK: true,
+				Channel: struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Topic struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				}{
+					ID:   channelID,
+					Name: "test-channel",
+					Topic: struct {
+						Value string `json:"value"`
+					}{Value: "サービス名:svc 緊急度:✅ サービスへの影響はない 事象内容:古い事象内容"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		c.Handle("/conversations.setTopic", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
 		}))
 	})
 	go srv.Start()

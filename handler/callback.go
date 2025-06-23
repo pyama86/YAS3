@@ -833,5 +833,15 @@ func (h *CallbackHandler) submitEditSummaryModal(callback *slack.InteractionCall
 		slack.MsgOptionText(fmt.Sprintf("✅ <@%s>が事象内容を更新しました\n*変更前:* %s\n*変更後:* %s", userID, oldSummary, summaryText), false),
 	)
 
+	// 周知チャンネルに通知
+	attachment := slack.Attachment{
+		Color:  "#f2c744",
+		Blocks: slack.Blocks{BlockSet: blocks.IncidentSummaryUpdated(oldSummary, summaryText, channelID, service)},
+	}
+
+	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
+		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
+	}
+
 	return nil
 }
