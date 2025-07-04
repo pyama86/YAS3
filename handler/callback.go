@@ -225,6 +225,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	summaryText := callback.View.State.Values["incident_summary_block"]["summary_text"].Value
 	urgency := callback.View.State.Values["urgency_block"]["urgency_select"].SelectedOption.Value
 	userID := callback.User.ID
+	originalChannelID := callback.View.PrivateMetadata
 
 	slog.Info("submitIncidentModal", slog.Any("serviceID", serviceID), slog.Any("summary_text", summaryText), slog.Any("urgency", urgency))
 
@@ -356,6 +357,16 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		channel.ID,
 		slack.MsgOptionBlocks(blocks.HandlerRecruitmentMessage()...),
 	)
+
+	// 元のチャンネルにインシデントチャンネルへの移動案内を送信
+	if originalChannelID != "" && originalChannelID != channel.ID {
+		moveMessage := fmt.Sprintf("🚨 インシデント対応は <#%s> で行います。関係者の方はそちらのチャンネルにご参加ください。", channel.ID)
+		h.repository.PostMessage(
+			originalChannelID,
+			slack.MsgOptionText(moveMessage, false),
+		)
+	}
+
 	return nil
 }
 
