@@ -85,8 +85,8 @@ func Handle(ctx context.Context, configPath string) error {
 		cfgRepository,
 	)
 
-	// 15分ごとにインシデントチャンネルに通知を行う
-	ticker := time.NewTicker(15 * time.Minute)
+	// 1分ごとに各インシデントの15分間隔チェックを確認
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	go func() {
 		for range ticker.C {
@@ -94,10 +94,15 @@ func Handle(ctx context.Context, configPath string) error {
 			if err != nil {
 				continue
 			}
+			now := time.Now()
 			for _, incident := range incidents {
 				if !incident.DisableTimer {
-					if err := timeKeeperMessage(webApi, &incident, slackRepository); err != nil {
-						slog.Error("Failed to send time keeper message", slog.Any("err", err))
+					// StartedAtから15分間隔で判定
+					elapsed := now.Sub(incident.StartedAt)
+					if int(elapsed.Minutes())%15 == 0 && int(elapsed.Seconds())%60 < 60 {
+						if err := timeKeeperMessage(webApi, &incident, slackRepository); err != nil {
+							slog.Error("Failed to send time keeper message", slog.Any("err", err))
+						}
 					}
 				}
 			}
