@@ -13,6 +13,8 @@ type Incident struct {
 	RecoveredUserID string    `json:"recovered_user_id" dynamo:"recovered_user_id"`
 	DisableTimer    bool      `json:"disable_timer" dynamo:"disable_timer"`
 	PostMortemURL   string    `json:"post_mortem_url" dynamo:"post_mortem_url"`
+	ReopenedAt      time.Time `json:"reopened_at" dynamo:"reopened_at"`
+	ReopenedUserID  string    `json:"reopened_user_id" dynamo:"reopened_user_id"`
 	StartedAt       time.Time `json:"started_at" dynamo:"started_at"`
 	RecoveredAt     time.Time `json:"recovered_at" dynamo:"recovered_at"`
 	ClosedAt        time.Time `json:"closed_at" dynamo:"closed_at"`

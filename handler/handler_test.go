@@ -515,7 +515,7 @@ func TestCallbackHandler_Handle(t *testing.T) {
 
 	api := slack.New("dummy", slack.OptionAPIURL(srv.GetAPIURL()))
 	incRepo := &mockIncidentRepo{data: map[string]*entity.Incident{
-		"CINC":  {ChannelID: "CINC", ServiceID: 1, Urgency: "none"},
+		"CINC":  {ChannelID: "CINC", ServiceID: 1, Urgency: "none", RecoveredAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC), DisableTimer: true},
 		"CNINC": {ChannelID: "CNINC", ServiceID: 1, Urgency: "none"},
 		"CDUM":  {ChannelID: "CDUM", ServiceID: 1, Urgency: "none"},
 		"CFROM": {ChannelID: "CFROM", ServiceID: 1, Urgency: "none"},
@@ -729,6 +729,31 @@ func TestCallbackHandler_Handle(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "in_channel_options => reopen_incident => ok (CINC)",
+			cb: slack.InteractionCallback{
+				Type: slack.InteractionTypeBlockActions,
+				Channel: slack.Channel{
+					GroupConversation: slack.GroupConversation{
+						Conversation: slack.Conversation{ID: "CINC"},
+					},
+				},
+				Message: slack.Message{
+					Msg: slack.Msg{Timestamp: "555.666"},
+				},
+				User: slack.User{ID: "UREOPEN"},
+				ActionCallback: slack.ActionCallbacks{
+					BlockActions: []*slack.BlockAction{
+						{
+							ActionID:       "in_channel_options",
+							BlockID:        "keeper_action",
+							SelectedOption: slack.OptionBlockObject{Value: "reopen_incident"},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tc := range tcs {
@@ -746,4 +771,337 @@ func TestCallbackHandler_Handle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// インシデント再開機能のテスト
+func TestIncidentReopen(t *testing.T) {
+	var postMsg, updateMsg, deleteMsg []map[string]string
+	var setTopicCalls []map[string]string
+
+	srv := slacktest.NewTestServer(func(c slacktest.Customize) {
+		c.Handle("/auth.test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"user_id":"UBOT"}`))
+		}))
+		c.Handle("/users.list", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp := struct {
+				OK      bool `json:"ok"`
+				Members []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				} `json:"members"`
+			}{
+				OK: true,
+				Members: []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				}{
+					{ID: "UREOPEN", Name: "reopener"},
+					{ID: "UHANDLER", Name: "handler"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		c.Handle("/chat.postMessage", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			postMsg = append(postMsg, map[string]string{
+				"channel":     r.FormValue("channel"),
+				"blocks":      r.FormValue("blocks"),
+				"attachments": r.FormValue("attachments"),
+				"text":        r.FormValue("text"),
+			})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		c.Handle("/chat.update", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			updateMsg = append(updateMsg, map[string]string{
+				"channel": r.FormValue("channel"),
+				"ts":      r.FormValue("ts"),
+				"blocks":  r.FormValue("blocks"),
+			})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		c.Handle("/chat.delete", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			deleteMsg = append(deleteMsg, map[string]string{
+				"channel": r.FormValue("channel"),
+				"ts":      r.FormValue("ts"),
+			})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		c.Handle("/conversations.list", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp := struct {
+				OK       bool `json:"ok"`
+				Channels []struct {
+					ID         string `json:"id"`
+					Name       string `json:"name"`
+					IsArchived bool   `json:"is_archived"`
+					Topic      struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				} `json:"channels"`
+			}{
+				OK: true,
+				Channels: []struct {
+					ID         string `json:"id"`
+					Name       string `json:"name"`
+					IsArchived bool   `json:"is_archived"`
+					Topic      struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				}{
+					{ID: "CREOPEN", Name: "reopen-test", IsArchived: false, Topic: struct {
+						Value string `json:"value"`
+					}{Value: "【復旧】テスト事象内容"}},
+					{ID: "CNOTREOPEN", Name: "not-reopen-test", IsArchived: false, Topic: struct {
+						Value string `json:"value"`
+					}{Value: "未復旧テスト事象内容"}},
+					{ID: "CANN", Name: "announcement", IsArchived: false, Topic: struct {
+						Value string `json:"value"`
+					}{Value: ""}},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		c.Handle("/conversations.info", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			channelID := r.URL.Query().Get("channel")
+			var topicValue string
+			switch channelID {
+			case "CREOPEN":
+				topicValue = "【復旧】テスト事象内容"
+			case "CNOTREOPEN":
+				topicValue = "未復旧テスト事象内容"
+			default:
+				topicValue = "デフォルトトピック"
+			}
+
+			resp := struct {
+				OK      bool `json:"ok"`
+				Channel struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Topic struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				} `json:"channel"`
+			}{
+				OK: true,
+				Channel: struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Topic struct {
+						Value string `json:"value"`
+					} `json:"topic"`
+				}{
+					ID:   channelID,
+					Name: "test-channel",
+					Topic: struct {
+						Value string `json:"value"`
+					}{Value: topicValue},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		c.Handle("/conversations.setTopic", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			setTopicCalls = append(setTopicCalls, map[string]string{
+				"channel": r.FormValue("channel"),
+				"topic":   r.FormValue("topic"),
+			})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+	})
+	go srv.Start()
+
+	api := slack.New("dummy", slack.OptionAPIURL(srv.GetAPIURL()))
+
+	defer srv.Stop()
+
+	t.Run("復旧済みインシデントの再開", func(t *testing.T) {
+		t.Setenv("TZ", "Asia/Tokyo")
+
+		// 復旧済みのインシデントを準備
+		recoveredTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+		incRepo := &mockIncidentRepo{
+			data: map[string]*entity.Incident{
+				"CREOPEN": {
+					ChannelID:       "CREOPEN",
+					Description:     "テスト事象内容",
+					Level:           1,
+					ServiceID:       1,
+					HandlerUserID:   "UHANDLER",
+					StartedAt:       time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+					RecoveredAt:     recoveredTime,
+					RecoveredUserID: "URECOVERED",
+					DisableTimer:    true,
+				},
+			},
+		}
+
+		cfgRepo := &mockConfigRepo{
+			services: []entity.Service{
+				{ID: 1, Name: "テストサービス", AnnouncementChannels: []string{"announcement"}},
+			},
+			levels: []entity.IncidentLevel{
+				{Level: 1, Description: "レベル1"},
+			},
+			announce: []string{"CANN"},
+		}
+
+		repo := repository.NewRepository(incRepo, cfgRepo, cfgRepo, repository.NewSlackRepository(api))
+		cbHandler := handler.NewCallbackHandler(context.Background(), repo, "https://example.com/", nil, nil, nil)
+
+		// 初期状態をリセット
+		postMsg = nil
+		updateMsg = nil
+		deleteMsg = nil
+		setTopicCalls = nil
+
+		// 再開処理を実行
+		err := cbHandler.Handle(&slack.InteractionCallback{
+			Type: slack.InteractionTypeBlockActions,
+			User: slack.User{ID: "UREOPEN"},
+			Channel: slack.Channel{
+				GroupConversation: slack.GroupConversation{
+					Conversation: slack.Conversation{ID: "CREOPEN"},
+				},
+			},
+			Message: slack.Message{
+				Msg: slack.Msg{Timestamp: "123.456"},
+			},
+			ActionCallback: slack.ActionCallbacks{
+				BlockActions: []*slack.BlockAction{
+					{
+						ActionID:       "in_channel_options",
+						BlockID:        "keeper_action",
+						SelectedOption: slack.OptionBlockObject{Value: "reopen_incident"},
+					},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+
+		// 非同期処理の完了を待つ
+		time.Sleep(100 * time.Millisecond)
+
+		// インシデントが再開状態に更新されたことを確認
+		reopenedIncident := incRepo.data["CREOPEN"]
+		assert.False(t, reopenedIncident.ReopenedAt.IsZero(), "再開時刻が設定されていません")
+		assert.Equal(t, "UREOPEN", reopenedIncident.ReopenedUserID, "再開者が正しく設定されていません")
+		assert.True(t, reopenedIncident.RecoveredAt.IsZero(), "復旧時刻がリセットされていません")
+		assert.Empty(t, reopenedIncident.RecoveredUserID, "復旧者がリセットされていません")
+		assert.False(t, reopenedIncident.DisableTimer, "タイマーが有効になっていません")
+
+		// チャンネルトピックが更新されたことを確認
+		assert.Len(t, setTopicCalls, 1, "トピック更新が呼ばれていません")
+		if len(setTopicCalls) > 0 {
+			assert.Equal(t, "CREOPEN", setTopicCalls[0]["channel"])
+			assert.Equal(t, "テスト事象内容", setTopicCalls[0]["topic"]) // 【復旧】プレフィックスが削除される
+		}
+
+		// 再開通知が投稿されたことを確認
+		assert.NotEmpty(t, postMsg, "再開通知が投稿されていません")
+
+		// チャンネル内通知とアナウンス通知の両方が投稿されたことを確認
+		channelNotificationFound := false
+		announcementNotificationFound := false
+		for _, msg := range postMsg {
+			if msg["channel"] == "CREOPEN" && msg["attachments"] != "" {
+				channelNotificationFound = true
+			}
+			if msg["channel"] == "CANN" && msg["attachments"] != "" {
+				announcementNotificationFound = true
+			}
+		}
+		assert.True(t, channelNotificationFound, "チャンネル内通知が投稿されていません")
+		assert.True(t, announcementNotificationFound, "アナウンス通知が投稿されていません")
+	})
+
+	t.Run("未復旧インシデントの再開試行", func(t *testing.T) {
+		t.Setenv("TZ", "Asia/Tokyo")
+
+		// 未復旧のインシデントを準備
+		incRepo := &mockIncidentRepo{
+			data: map[string]*entity.Incident{
+				"CNOTREOPEN": {
+					ChannelID:   "CNOTREOPEN",
+					Description: "未復旧事象内容",
+					Level:       1,
+					ServiceID:   1,
+					StartedAt:   time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+					// RecoveredAtが未設定（未復旧状態）
+				},
+			},
+		}
+
+		cfgRepo := &mockConfigRepo{
+			services: []entity.Service{
+				{ID: 1, Name: "テストサービス"},
+			},
+		}
+
+		repo := repository.NewRepository(incRepo, cfgRepo, cfgRepo, repository.NewSlackRepository(api))
+		cbHandler := handler.NewCallbackHandler(context.Background(), repo, "https://example.com/", nil, nil, nil)
+
+		// 初期状態をリセット
+		postMsg = nil
+		updateMsg = nil
+		deleteMsg = nil
+		setTopicCalls = nil
+
+		// 再開処理を実行
+		err := cbHandler.Handle(&slack.InteractionCallback{
+			Type: slack.InteractionTypeBlockActions,
+			User: slack.User{ID: "UREOPEN"},
+			Channel: slack.Channel{
+				GroupConversation: slack.GroupConversation{
+					Conversation: slack.Conversation{ID: "CNOTREOPEN"},
+				},
+			},
+			Message: slack.Message{
+				Msg: slack.Msg{Timestamp: "789.123"},
+			},
+			ActionCallback: slack.ActionCallbacks{
+				BlockActions: []*slack.BlockAction{
+					{
+						ActionID:       "in_channel_options",
+						BlockID:        "keeper_action",
+						SelectedOption: slack.OptionBlockObject{Value: "reopen_incident"},
+					},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+
+		// 非同期処理の完了を待つ
+		time.Sleep(100 * time.Millisecond)
+
+		// エラーメッセージが投稿されたことを確認
+		assert.NotEmpty(t, postMsg, "エラーメッセージが投稿されていません")
+		errorMsgFound := false
+		for _, msg := range postMsg {
+			if msg["channel"] == "CNOTREOPEN" && msg["text"] == "⚠️ インシデントはまだ復旧していません。復旧していないインシデントは再開できません。" {
+				errorMsgFound = true
+				break
+			}
+		}
+		assert.True(t, errorMsgFound, "適切なエラーメッセージが投稿されていません")
+
+		// インシデントの状態が変更されていないことを確認
+		incident := incRepo.data["CNOTREOPEN"]
+		assert.True(t, incident.ReopenedAt.IsZero(), "インシデントが誤って再開されています")
+		assert.Empty(t, incident.ReopenedUserID, "再開者が誤って設定されています")
+
+		// トピックが変更されていないことを確認
+		assert.Empty(t, setTopicCalls, "トピックが誤って変更されています")
+	})
 }

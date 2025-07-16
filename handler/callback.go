@@ -131,6 +131,12 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 					return fmt.Errorf("recoveryIncident failed: %w", err)
 				}
 
+			case "reopen_incident":
+				slog.Info("reopen_incident", slog.Any("channelID", callback.Channel.ID))
+				if err := h.reopenIncident(callback.User.ID, callback.Channel.ID); err != nil {
+					return fmt.Errorf("reopenIncident failed: %w", err)
+				}
+
 			case "stop_timekeeper":
 				slog.Info("stop_timekeeper", slog.Any("channelID", callback.Channel.ID))
 				if err := h.stopTimeKeeper(callback.Channel.ID, callback.User.ID); err != nil {
@@ -848,6 +854,88 @@ func (h *CallbackHandler) submitEditSummaryModal(callback *slack.InteractionCall
 	attachment := slack.Attachment{
 		Color:  "#f2c744",
 		Blocks: slack.Blocks{BlockSet: blocks.IncidentSummaryUpdated(oldSummary, summaryText, channelID, service)},
+	}
+
+	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
+		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
+	}
+
+	return nil
+}
+
+// インシデントを再開する
+func (h *CallbackHandler) reopenIncident(userID, channelID string) error {
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+
+	if incident == nil {
+		return fmt.Errorf("incident is nil")
+	}
+
+	// 既に復旧していない場合はエラー
+	if incident.RecoveredAt.IsZero() {
+		h.repository.PostMessage(
+			channelID,
+			slack.MsgOptionText("⚠️ インシデントはまだ復旧していません。復旧していないインシデントは再開できません。", false),
+		)
+		return nil
+	}
+
+	// インシデントを再開状態に更新
+	incident.ReopenedAt = timeNow()
+	incident.ReopenedUserID = userID
+	incident.RecoveredAt = time.Time{} // 復旧時刻をリセット
+	incident.RecoveredUserID = ""      // 復旧者をリセット
+	incident.DisableTimer = false      // タイマーを再開
+
+	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
+		return fmt.Errorf("failed to SaveIncident: %w", err)
+	}
+
+	service, err := h.repository.ServiceByID(h.ctx, incident.ServiceID)
+	if err != nil {
+		return fmt.Errorf("failed to ServiceByID: %w", err)
+	}
+
+	channel, err := h.repository.GetChannelByID(channelID)
+	if err != nil {
+		return fmt.Errorf("failed to GetChannelByID: %w", err)
+	}
+
+	// トピックから【復旧】プレフィックスを削除
+	topic := strings.TrimPrefix(channel.Topic.Value, "【復旧】")
+	err = h.repository.SetTopicOfConversation(channel.ID, topic)
+	if err != nil {
+		return fmt.Errorf("failed to SetTopicOfConversation: %w", err)
+	}
+
+	// チャンネル内に再開通知
+	attachment := slack.Attachment{
+		Color:  "#ff0000",
+		Blocks: slack.Blocks{BlockSet: blocks.IncidentReopened(userID, incident.HandlerUserID)},
+	}
+
+	h.repository.PostMessage(
+		channelID,
+		slack.MsgOptionAttachments(attachment),
+	)
+
+	// アナウンスチャンネルに通知
+	incidentLevel, err := h.repository.IncidentLevelByLevel(h.ctx, incident.Level)
+	if err != nil {
+		return fmt.Errorf("failed to IncidentLevelByLevel: %w", err)
+	}
+
+	attachment = slack.Attachment{
+		Color: "#ff0000",
+		Blocks: slack.Blocks{BlockSet: blocks.IncidentReopenedAnnounce(
+			incident.Description,
+			incidentLevel.Description,
+			channel.ID,
+			service,
+		)},
 	}
 
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {

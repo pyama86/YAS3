@@ -10,6 +10,11 @@ func InChannelOptions() []*slack.OptionBlockObject {
 			nil,
 		),
 		slack.NewOptionBlockObject(
+			"reopen_incident",
+			slack.NewTextBlockObject("plain_text", "🔴 インシデントを再開する", false, false),
+			nil,
+		),
+		slack.NewOptionBlockObject(
 			"stop_timekeeper",
 			slack.NewTextBlockObject("plain_text", "⏹️ タイムキーパーをとめる", false, false),
 			nil,
