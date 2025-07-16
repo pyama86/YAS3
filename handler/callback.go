@@ -640,26 +640,98 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	formattedMessages += fmt.Sprintf("- %s %sさんがインシデントを復旧を宣言\n", recoveredAt.Format("2006-01-02 15:04:05"), h.repository.GetUserPreferredName(recoveredUser))
 
 	channelURL := fmt.Sprintf("%sarchives/%s", h.workSpaceURL, channel.ID)
+
+	// デフォルト値の設定
 	title := "例: サービスAPIが応答停止"
 	summary := "例: サービスAPIが応答しない"
+	status := "解決済み"
+	impact := "例: サービスが断続的にダウンし、最大で１割のユーザーが影響を受けました。"
+	rootCause := "例: ExampleAPIのバグ、設定ミス"
+	trigger := "例: 監視アラート、ユーザーからの報告"
+	solution := "例: 切り戻し、データベースの再起動"
+	actionItems := "例:\n- 【根本対応】原因となったエンドポイントの修正\n- 【緩和策】エラーハンドリングの追加"
+	lessonsGood := "例: 迅速な対応により影響時間を最小限に抑えることができた"
+	lessonsBad := "例: 初期対応時の情報共有が不十分だった"
+	lessensLucky := "例: 障害発生がピーク時間外だったため影響が限定的だった"
+
 	postmortemFileTitle := fmt.Sprintf("postmortem-%s", channel.Name)
 
 	if h.aiRepository != nil {
+		// タイトル生成
 		t, err := h.aiRepository.GenerateTitle(incident.Description, formattedMessages)
 		if err != nil {
 			return fmt.Errorf("failed to GenerateTitle: %w", err)
 		}
+		title = t
+		postmortemFileTitle = fmt.Sprintf("postmortem-%s", t)
+
+		// サマリー生成
 		s, err := h.aiRepository.Summarize(incident.Description, formattedMessages)
 		if err != nil {
 			return fmt.Errorf("failed to Summarize: %w", err)
 		}
-		title = t
 		summary = s
-		postmortemFileTitle = fmt.Sprintf("postmortem-%s", t)
 		incident.Description = s
+
+		// ステータス生成
+		st, err := h.aiRepository.GenerateStatus(incident.Description, formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to GenerateStatus: %w", err)
+		}
+		status = st
+
+		// 影響分析生成
+		i, err := h.aiRepository.GenerateImpact(incident.Description, formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to GenerateImpact: %w", err)
+		}
+		impact = i
+
+		// 根本原因生成
+		rc, err := h.aiRepository.GenerateRootCause(incident.Description, formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to GenerateRootCause: %w", err)
+		}
+		rootCause = rc
+
+		// トリガー生成
+		tr, err := h.aiRepository.GenerateTrigger(incident.Description, formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to GenerateTrigger: %w", err)
+		}
+		trigger = tr
+
+		// 解決策生成
+		so, err := h.aiRepository.GenerateSolution(incident.Description, formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to GenerateSolution: %w", err)
+		}
+		solution = so
+
+		// アクションアイテム生成
+		ai, err := h.aiRepository.GenerateActionItems(incident.Description, formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to GenerateActionItems: %w", err)
+		}
+		actionItems = ai
+
+		// 学んだ教訓生成
+		lg, lb, ll, err := h.aiRepository.GenerateLessonsLearned(incident.Description, formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to GenerateLessonsLearned: %w", err)
+		}
+		lessonsGood = lg
+		lessonsBad = lb
+		lessensLucky = ll
+
+		// タイムライン整形
+		formattedMessages, err = h.aiRepository.FormatTimeline(formattedMessages)
+		if err != nil {
+			return fmt.Errorf("failed to FormatTimeline: %w", err)
+		}
 	}
 
-	rendered := postmortem.Render(title, createdAt.Format("2006-01-02 15:04:05"), author, summary, formattedMessages, channelURL)
+	rendered := postmortem.Render(title, createdAt.Format("2006-01-02 15:04:05"), author, status, summary, impact, rootCause, trigger, solution, actionItems, lessonsGood, lessonsBad, lessensLucky, formattedMessages, channelURL)
 
 	if h.postmortemExporter != nil {
 		service, err := h.repository.ServiceByID(h.ctx, incident.ServiceID)

@@ -2,7 +2,7 @@ package postmortem
 
 import "fmt"
 
-func Render(title, createdAt, author, summary, timeline, channelURL string) string {
+func Render(title, createdAt, author, summary, status, impact, rootCause, trigger, solution, actionItems, lessonsGood, lessonsBad, lessonsLucky, timeline, channelURL string) string {
 	return fmt.Sprintf(`
 # タイトル
 
@@ -18,7 +18,7 @@ func Render(title, createdAt, author, summary, timeline, channelURL string) stri
 
 ## ステータス
 
-例: 未解決、解決済み、クローズ
+%s
 
 ## 概要
 
@@ -26,32 +26,37 @@ func Render(title, createdAt, author, summary, timeline, channelURL string) stri
 
 ## 影響
 
-例: サービスが断続的にダウンし、最大で１割のユーザーが影響を受けました。
+%s
 
 ## 主な原因
 
-例: ExamleAPIのバグ、設定ミス
+%s
 
 ## 障害発生のトリガー
 
-例:監視アラート、ユーザーからの報告
+%s
 
 ## 解決策
 
-例:切り戻し、データベースの再起動
+%s
 
 ## アクションアイテム
-例:
-- 【根本対応】原因となったエンドポイントの修正(担当: Aさん)
-- 【緩和策】エラーハンドリングの追加(担当: Bさん)
+
+%s
 
 ## 学んだ教訓
 
 ### うまくいったこと
 
+%s
+
 ### うまくいかなかったこと
 
+%s
+
 ### 幸運だったこと
+
+%s
 
 ## タイムライン
 
@@ -59,5 +64,5 @@ func Render(title, createdAt, author, summary, timeline, channelURL string) stri
 
 ## 補足情報
 - [インシデント対応チャンネル](%s)
-`, title, createdAt, author, summary, timeline, channelURL)
+`, title, createdAt, author, status, summary, impact, rootCause, trigger, solution, actionItems, lessonsGood, lessonsBad, lessonsLucky, timeline, channelURL)
 }
