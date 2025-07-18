@@ -180,10 +180,13 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 			case "recovery_incident":
 				slog.Info("recovery_incident", slog.Any("channelID", callback.Channel.ID))
 				// 確認フォームを表示
-				h.repository.PostMessage(
+				_, _, err := h.repository.PostMessage(
 					callback.Channel.ID,
 					slack.MsgOptionBlocks(blocks.RecoveryConfirmation()...),
 				)
+				if err != nil {
+					slog.Error("Failed to post recovery confirmation", slog.Any("err", err))
+				}
 
 			case "reopen_incident":
 				slog.Info("reopen_incident", slog.Any("channelID", callback.Channel.ID))
@@ -194,10 +197,13 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 			case "stop_timekeeper":
 				slog.Info("stop_timekeeper", slog.Any("channelID", callback.Channel.ID))
 				// 確認フォームを表示
-				h.repository.PostMessage(
+				_, _, err := h.repository.PostMessage(
 					callback.Channel.ID,
 					slack.MsgOptionBlocks(blocks.TimekeeperStopConfirmation()...),
 				)
+				if err != nil {
+					slog.Error("Failed to post timekeeper stop confirmation", slog.Any("err", err))
+				}
 			case "set_incident_level":
 				slog.Info("set_incident_level", slog.Any("channelID", callback.Channel.ID))
 				h.showIncidentLevelButtons(callback.Channel.ID)
@@ -214,10 +220,13 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 			case "create_progress_summary":
 				slog.Info("create_progress_summary", slog.Any("channelID", callback.Channel.ID))
 				// 確認フォームを表示
-				h.repository.PostMessage(
+				_, _, err := h.repository.PostMessage(
 					callback.Channel.ID,
 					slack.MsgOptionBlocks(blocks.ProgressSummaryConfirmation()...),
 				)
+				if err != nil {
+					slog.Error("Failed to post progress summary confirmation", slog.Any("err", err))
+				}
 			}
 
 		}
@@ -253,10 +262,13 @@ func (h *CallbackHandler) submitHandler(userID, channelID string) error {
 		return fmt.Errorf("failed to SaveIncident: %w", err)
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.AcceptIncidentHandler(userID)...),
 	)
+	if err != nil {
+		slog.Error("Failed to post accept incident handler message", slog.Any("err", err))
+	}
 
 	return nil
 }
@@ -330,10 +342,13 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	})
 
 	if err != nil {
-		h.repository.PostMessage(
+		_, _, postErr := h.repository.PostMessage(
 			callback.Channel.ID,
 			slack.MsgOptionText(fmt.Sprintf("❌ チャンネルの作成に失敗しました:%s", err), false),
 		)
+		if postErr != nil {
+			slog.Error("Failed to post channel creation error message", slog.Any("err", postErr))
+		}
 
 		return fmt.Errorf("failed to CreateConversation: %w", err)
 	}
@@ -387,34 +402,43 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 			return fmt.Errorf("failed to InviteUsersToConversation: %w", err)
 		}
 
-		h.repository.PostMessage(
+		_, _, err = h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionBlocks(blocks.InviteMembers(service)...),
 		)
+		if err != nil {
+			slog.Error("Failed to post invite members message", slog.Any("err", err))
+		}
 	}
 
 	if len(errMembers) > 0 {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText(fmt.Sprintf("❌ チームメンバーの取得に失敗しました:%s", strings.Join(errMembers, ",")), false),
 		)
+		if err != nil {
+			slog.Error("Failed to post team member error message", slog.Any("err", err))
+		}
 	}
 
 	attachment := slack.Attachment{
 		Color:  urgencyColorMap[urgency],
 		Blocks: slack.Blocks{BlockSet: blocks.IncidentCreated(summaryText, urgencyText, channel.ID, service)},
 	}
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionAttachments(attachment),
 	)
+	if err != nil {
+		slog.Error("Failed to post incident created attachment", slog.Any("err", err))
+	}
 
 	// 共有チャンネルにお知らせを投稿
 	if err := h.broadCastAnnouncement(channel.ID, attachment, service); err != nil {
 		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionBlocks(blocks.IncidentReportRequest(userID)...),
 	)
@@ -422,18 +446,24 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 		return fmt.Errorf("failed to PostMessage: %w", err)
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionBlocks(blocks.HandlerRecruitmentMessage()...),
 	)
+	if err != nil {
+		slog.Error("Failed to post handler recruitment message", slog.Any("err", err))
+	}
 
 	// 元のチャンネルにインシデントチャンネルへの移動案内を送信
 	if originalChannelID != "" && originalChannelID != channel.ID {
 		moveMessage := fmt.Sprintf("🚨 インシデント対応は <#%s> で行います。関係者の方はそちらのチャンネルにご参加ください。", channel.ID)
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			originalChannelID,
 			slack.MsgOptionText(moveMessage, false),
 		)
+		if err != nil {
+			slog.Error("Failed to post move message", slog.Any("err", err))
+		}
 	}
 
 	return nil
@@ -450,10 +480,13 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		return fmt.Errorf("incident is nil")
 	}
 	if !incident.RecoveredAt.IsZero() {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionBlocks(blocks.AlreadyRecovered()...),
 		)
+		if err != nil {
+			slog.Error("Failed to post already recovered message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -484,10 +517,13 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		Blocks: slack.Blocks{BlockSet: blocks.IncidentRecovered(userID, incident.HandlerUserID)},
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionAttachments(attachment),
 	)
+	if err != nil {
+		slog.Error("Failed to post incident recovered message", slog.Any("err", err))
+	}
 
 	incidentLevel, err := h.repository.IncidentLevelByLevel(h.ctx, incident.Level)
 	if err != nil {
@@ -527,10 +563,13 @@ func (h *CallbackHandler) stopTimeKeeper(channelID, userID string) error {
 		return fmt.Errorf("failed to SaveIncident: %w", err)
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.TimeKeeperStopped(userID)...),
 	)
+	if err != nil {
+		slog.Error("Failed to post timekeeper stopped message", slog.Any("err", err))
+	}
 	return nil
 }
 
@@ -584,10 +623,13 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 		},
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.IncidentLevelChanged(userID, description)...),
 	)
+	if err != nil {
+		slog.Error("Failed to post incident level changed message", slog.Any("err", err))
+	}
 
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
 		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
@@ -599,10 +641,13 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 // インシデントレベルの選択肢を提供する
 func (h *CallbackHandler) showIncidentLevelButtons(channelID string) {
 	levels := h.repository.IncidentLevels(h.ctx)
-	h.repository.PostMessage(
+	_, _, err := h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.IncidentLevelButtons(levels)...),
 	)
+	if err != nil {
+		slog.Error("Failed to post incident level buttons", slog.Any("err", err))
+	}
 }
 
 // ピンを打つアナウンスをして、ボタンを表示する
@@ -613,17 +658,23 @@ func (h *CallbackHandler) showPostMortemButton(channelID string) error {
 	}
 
 	if incident.RecoveredAt.IsZero() {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText("⛔️まだインシデントが復旧していません", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post incident not recovered message", slog.Any("err", err))
+		}
 		return nil
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionBlocks(blocks.PostMortemButton()...),
 	)
+	if err != nil {
+		slog.Error("Failed to post postmortem button", slog.Any("err", err))
+	}
 	return nil
 }
 
@@ -635,10 +686,13 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	}
 
 	if incident.PostMortemURL != "" {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("⛔️ポストモーテムは既に作成されています", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post postmortem exists message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -816,10 +870,13 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		incident.PostMortemURL = url
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionText(fmt.Sprintf("✅️ポストモーテムを作成しました: %s", incident.PostMortemURL), false),
 	)
+	if err != nil {
+		slog.Error("Failed to post postmortem created message", slog.Any("err", err))
+	}
 
 	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
 		return fmt.Errorf("failed to SaveIncident: %w", err)
@@ -881,14 +938,20 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 			continue
 		}
 
-		h.repository.PostMessage(
+		_, _, err = h.repository.PostMessage(
 			cinfo.ID,
 			slack.MsgOptionAttachments(attachment),
 		)
-		h.repository.PostMessage(
+		if err != nil {
+			slog.Error("Failed to post announcement attachment", slog.Any("err", err))
+		}
+		_, _, err = h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
 		)
+		if err != nil {
+			slog.Error("Failed to post notification message", slog.Any("err", err))
+		}
 	}
 	return nil
 }
@@ -980,10 +1043,13 @@ func (h *CallbackHandler) submitEditSummaryModal(callback *slack.InteractionCall
 	}
 
 	// 変更を通知
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionText(fmt.Sprintf("✅ <@%s>が事象内容を更新しました\n*変更前:* %s\n*変更後:* %s", userID, oldSummary, summaryText), false),
 	)
+	if err != nil {
+		slog.Error("Failed to post summary update message", slog.Any("err", err))
+	}
 
 	// 周知チャンネルに通知
 	attachment := slack.Attachment{
@@ -1011,10 +1077,13 @@ func (h *CallbackHandler) reopenIncident(userID, channelID string) error {
 
 	// 既に復旧していない場合はエラー
 	if incident.RecoveredAt.IsZero() {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText("⚠️ インシデントはまだ復旧していません。復旧していないインシデントは再開できません。", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post incident not recovered message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -1052,10 +1121,13 @@ func (h *CallbackHandler) reopenIncident(userID, channelID string) error {
 		Blocks: slack.Blocks{BlockSet: blocks.IncidentReopened(userID, incident.HandlerUserID)},
 	}
 
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channelID,
 		slack.MsgOptionAttachments(attachment),
 	)
+	if err != nil {
+		slog.Error("Failed to post incident reopened message", slog.Any("err", err))
+	}
 
 	// アナウンスチャンネルに通知
 	incidentLevel, err := h.repository.IncidentLevelByLevel(h.ctx, incident.Level)
@@ -1088,10 +1160,13 @@ func (h *CallbackHandler) createProgressSummary(channel slack.Channel, user slac
 	}
 
 	if incident == nil {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ このチャンネルにはインシデントが見つかりません", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post incident not found message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -1102,10 +1177,13 @@ func (h *CallbackHandler) createProgressSummary(channel slack.Channel, user slac
 	}
 
 	if len(messages) == 0 {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ 分析できるメッセージがありません", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post no messages message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -1214,10 +1292,13 @@ func (h *CallbackHandler) createProgressSummaryFallback(channel slack.Channel, i
 	// AIで進捗サマリを生成（従来の方式）
 	summary, err := h.aiRepository.SummarizeProgress(incident.Description, timeline.String())
 	if err != nil {
-		h.repository.PostMessage(
+		_, _, postErr := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ 進捗サマリの生成に失敗しました", false),
 		)
+		if postErr != nil {
+			slog.Error("Failed to post summary generation error message", slog.Any("err", postErr))
+		}
 		return fmt.Errorf("failed to SummarizeProgress: %w", err)
 	}
 
@@ -1241,10 +1322,13 @@ func (h *CallbackHandler) postToReportChannel(channel slack.Channel, user slack.
 	}
 
 	if incident == nil {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ このチャンネルにはインシデントが見つかりません", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post incident not found message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -1260,10 +1344,13 @@ func (h *CallbackHandler) postToReportChannel(channel slack.Channel, user slack.
 	}
 
 	if !hasAnnouncementChannels {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ アナウンスチャンネルが設定されていません", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post no announcement channels message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -1289,10 +1376,13 @@ func (h *CallbackHandler) postToReportChannel(channel slack.Channel, user slack.
 	}
 
 	if summaryText == "" {
-		h.repository.PostMessage(
+		_, _, err := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ 投稿するサマリが見つかりません", false),
 		)
+		if err != nil {
+			slog.Error("Failed to post no summary found message", slog.Any("err", err))
+		}
 		return nil
 	}
 
@@ -1303,18 +1393,24 @@ func (h *CallbackHandler) postToReportChannel(channel slack.Channel, user slack.
 	}
 
 	if err := h.broadCastAnnouncement(channel.ID, attachment, service); err != nil {
-		h.repository.PostMessage(
+		_, _, postErr := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ アナウンスチャンネルへの投稿に失敗しました", false),
 		)
+		if postErr != nil {
+			slog.Error("Failed to post broadcast error message", slog.Any("err", postErr))
+		}
 		return fmt.Errorf("failed to broadcast progress summary: %w", err)
 	}
 
 	// 投稿成功を通知
-	h.repository.PostMessage(
+	_, _, err = h.repository.PostMessage(
 		channel.ID,
 		slack.MsgOptionBlocks(blocks.ReportPostSuccess("アナウンスチャンネル")...),
 	)
+	if err != nil {
+		slog.Error("Failed to post success message", slog.Any("err", err))
+	}
 
 	return nil
 }

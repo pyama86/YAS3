@@ -462,9 +462,8 @@ func (h *SlackRepository) UploadFile(workspackeURL, userID, channelID, filename,
 // チャンネルの履歴を取得
 func (h *SlackRepository) GetChannelHistory(channelID, oldest, latest string, limit int) ([]slack.Message, error) {
 	var history *slack.History
-	var err error
 
-	err = retry.Retry(3, time.Second*3, func() error {
+	err := retry.Retry(3, time.Second*3, func() error {
 		params := &slack.GetConversationHistoryParameters{
 			ChannelID: channelID,
 			Limit:     limit,
