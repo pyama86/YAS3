@@ -4,16 +4,20 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Songmu/retry"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/azure"
 	"github.com/openai/openai-go/option"
+	"github.com/slack-go/slack"
 )
 
 type AIRepositorier interface {
 	Summarize(description, slackMessages string) (string, error)
+	SummarizeProgress(description, slackMessages string) (string, error)
+	SummarizeProgressAdvanced(description string, messages []slack.Message, previousSummary string) (string, error)
 	GenerateTitle(description, slackMessages string) (string, error)
 	GenerateStatus(description, slackMessages string) (string, error)
 	GenerateImpact(description, slackMessages string) (string, error)
@@ -102,6 +106,244 @@ func (h *AIRepository) Summarize(description, slackMessages string) (string, err
 %s`, description, slackMessages)
 
 	return h.callOpenAIWithRetry(prompt)
+}
+
+func (h *AIRepository) SummarizeProgress(description, slackMessages string) (string, error) {
+	prompt := fmt.Sprintf(`## 依頼内容
+これまでのインシデント対応状況をまとめた進捗サマリを作成してください。
+あなたには人間が考えた事象の概要と、Slackのメッセージが与えられます。
+
+## フォーマットの指定：
+Slack投稿用として3000文字以内で、関係者向けの報告として適切な内容で出力してください。
+以下の構成で記載してください：
+
+### 📊 インシデント概要
+- 事象の簡潔な説明
+- 影響範囲とレベル
+
+### 🔄 現在の状況
+- 復旧済み/対応中/調査中のステータス
+- 最新の対応状況
+
+### ✅ 実施済み対応
+- これまでに実施した対応内容
+- 効果があった対策
+
+### 🎯 次のアクション
+- 予定されている対応
+- 今後の方針
+
+### 📢 関係者への情報
+- 重要な注意点
+- 協力依頼事項
+
+## 重要な指示：
+- **提供されたSlackメッセージに明確に記載されていない情報は推測せず、「詳細不明」「情報不足」「確認中」などと記載してください**
+- 不確実な情報や推測に基づく内容は含めないでください
+- メッセージに具体的な記載がない場合は「メッセージから詳細を確認できませんでした」と正直に記載してください
+- あなたから受け取った文章はそのまま私の定義したテンプレートに埋め込むので、上記の構造化されたフォーマットで返却してください
+
+## 人間が考えた事象の概要
+%s
+
+## 関連するSlackのメッセージ
+%s`, description, slackMessages)
+
+	return h.callOpenAIWithRetry(prompt)
+}
+
+// 高度な進捗サマリ生成（トークン制限対応・分割処理対応）
+func (h *AIRepository) SummarizeProgressAdvanced(description string, messages []slack.Message, previousSummary string) (string, error) {
+	// トークン計算機を初期化
+	tokenCalc, err := NewTokenCalculator()
+	if err != nil {
+		// フォールバック: 従来の方式
+		return h.SummarizeProgress(description, h.formatMessagesSimple(messages))
+	}
+
+	// ベースプロンプトを構築
+	var basePrompt string
+	if previousSummary != "" {
+		basePrompt = h.createIncrementalPrompt(description, previousSummary)
+	} else {
+		basePrompt = h.createInitialPrompt(description)
+	}
+
+	// トークン数をチェック
+	totalTokens := tokenCalc.CountMessagesTokens(messages, basePrompt)
+
+	// トークン制限内の場合は一度に処理
+	if totalTokens <= MaxTokensGPT4 {
+		return h.processSingleChunk(basePrompt, messages, tokenCalc)
+	}
+
+	// トークン制限を超える場合は分割処理
+	return h.processMultipleChunks(basePrompt, messages, tokenCalc)
+}
+
+// 増分更新用プロンプト作成
+func (h *AIRepository) createIncrementalPrompt(description, previousSummary string) string {
+	return fmt.Sprintf(`## 依頼内容
+インシデント対応の進捗サマリを更新してください。
+前回のサマリに新しい情報を統合して、最新の状況を反映したサマリを作成してください。
+
+## フォーマット指定
+Slack投稿用として3000文字以内で、以下の構成で記載してください：
+
+### 📊 インシデント概要
+- 事象の簡潔な説明
+- 影響範囲とレベル
+
+### 🔄 現在の状況
+- 復旧済み/対応中/調査中のステータス
+- 最新の対応状況
+
+### ✅ 実施済み対応
+- これまでに実施した対応内容
+- 効果があった対策
+
+### 🎯 次のアクション
+- 予定されている対応
+- 今後の方針
+
+### 📢 関係者への情報
+- 重要な注意点
+- 協力依頼事項
+
+## 重要な指示：
+- **提供されたSlackメッセージに明確に記載されていない情報は推測せず、「詳細不明」「情報不足」「確認中」などと記載してください**
+- 不確実な情報や推測に基づく内容は含めないでください
+- メッセージに具体的な記載がない場合は「メッセージから詳細を確認できませんでした」と正直に記載してください
+
+## インシデント概要
+%s
+
+## 前回のサマリ
+%s
+
+## 新しい情報（Slackメッセージ）`, description, previousSummary)
+}
+
+// 初回作成用プロンプト作成
+func (h *AIRepository) createInitialPrompt(description string) string {
+	return fmt.Sprintf(`## 依頼内容
+これまでのインシデント対応状況をまとめた進捗サマリを作成してください。
+あなたには人間が考えた事象の概要と、Slackのメッセージが与えられます。
+
+## フォーマット指定
+Slack投稿用として3000文字以内で、関係者向けの報告として適切な内容で出力してください。
+以下の構成で記載してください：
+
+### 📊 インシデント概要
+- 事象の簡潔な説明
+- 影響範囲とレベル
+
+### 🔄 現在の状況
+- 復旧済み/対応中/調査中のステータス
+- 最新の対応状況
+
+### ✅ 実施済み対応
+- これまでに実施した対応内容
+- 効果があった対策
+
+### 🎯 次のアクション
+- 予定されている対応
+- 今後の方針
+
+### 📢 関係者への情報
+- 重要な注意点
+- 協力依頼事項
+
+## 重要な指示：
+- **提供されたSlackメッセージに明確に記載されていない情報は推測せず、「詳細不明」「情報不足」「確認中」などと記載してください**
+- 不確実な情報や推測に基づく内容は含めないでください
+- メッセージに具体的な記載がない場合は「メッセージから詳細を確認できませんでした」と正直に記載してください
+- あなたから受け取った文章はそのまま私の定義したテンプレートに埋め込むので、上記の構造化されたフォーマットで返却してください
+
+## 人間が考えた事象の概要
+%s
+
+## 関連するSlackのメッセージ`, description)
+}
+
+// 単一チャンクでの処理
+func (h *AIRepository) processSingleChunk(basePrompt string, messages []slack.Message, tokenCalc *TokenCalculator) (string, error) {
+	var messageText strings.Builder
+	for _, msg := range messages {
+		messageText.WriteString(tokenCalc.FormatMessage(msg))
+		messageText.WriteString("\n")
+	}
+
+	fullPrompt := basePrompt + "\n" + messageText.String()
+	return h.callOpenAIWithRetry(fullPrompt)
+}
+
+// 複数チャンクでの分割処理
+func (h *AIRepository) processMultipleChunks(basePrompt string, messages []slack.Message, tokenCalc *TokenCalculator) (string, error) {
+	// メッセージを重要度付きで分割
+	chunks := tokenCalc.SplitMessagesWithPriority(messages, basePrompt, MaxTokensGPT4)
+
+	if len(chunks) == 0 {
+		return "", fmt.Errorf("no messages to process")
+	}
+
+	if len(chunks) == 1 {
+		return h.processSingleChunk(basePrompt, chunks[0], tokenCalc)
+	}
+
+	// 各チャンクで部分サマリを作成
+	var partialSummaries []string
+	for i, chunk := range chunks {
+		chunkPrompt := fmt.Sprintf("%s\n\n## 部分 %d/%d のメッセージ", basePrompt, i+1, len(chunks))
+
+		summary, err := h.processSingleChunk(chunkPrompt, chunk, tokenCalc)
+		if err != nil {
+			return "", fmt.Errorf("failed to process chunk %d: %w", i+1, err)
+		}
+		partialSummaries = append(partialSummaries, summary)
+	}
+
+	// 部分サマリを統合
+	mergePrompt := tokenCalc.CreateMergePrompt(partialSummaries)
+	return h.callOpenAIWithRetryWithErrorHandling(mergePrompt)
+}
+
+// メッセージを簡単な文字列に変換（フォールバック用）
+func (h *AIRepository) formatMessagesSimple(messages []slack.Message) string {
+	var builder strings.Builder
+	for _, msg := range messages {
+		builder.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+	}
+	return builder.String()
+}
+
+// エラーハンドリング強化版のOpenAI呼び出し
+func (h *AIRepository) callOpenAIWithRetryWithErrorHandling(prompt string) (string, error) {
+	var result string
+	err := retry.Retry(3, time.Second*3, func() error {
+		resp, err := h.client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				openai.UserMessage(prompt),
+			},
+			Model: h.model,
+		})
+		if err != nil {
+			// トークン超過エラーの特別処理
+			if strings.Contains(err.Error(), "token") || strings.Contains(err.Error(), "length") {
+				return fmt.Errorf("token_limit_exceeded: %w", err)
+			}
+			return err
+		}
+
+		if len(resp.Choices) == 0 {
+			return fmt.Errorf("no response from OpenAI")
+		}
+
+		result = resp.Choices[0].Message.Content
+		return nil
+	})
+
+	return result, err
 }
 
 func (h *AIRepository) GenerateTitle(description, slackMessages string) (string, error) {

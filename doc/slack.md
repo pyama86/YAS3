@@ -21,6 +21,7 @@
                 "app_mentions:read",
                 "channels:manage",
                 "channels:read",
+                "channels:history",
                 "channels:write.topic",
                 "chat:write",
                 "groups:read",

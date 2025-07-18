@@ -31,12 +31,19 @@ func CheckPoint(elapsedStr string) []slack.Block {
 			nil,
 			nil,
 		),
-		slack.NewActionBlock("keeper_action", slack.NewOptionsSelectBlockElement(
-			slack.OptTypeStatic,
-			slack.NewTextBlockObject("plain_text", "操作を選択してください", false, false),
-			"in_channel_options",
-			InChannelOptions()...,
-		)),
+		slack.NewActionBlock("keeper_action",
+			slack.NewOptionsSelectBlockElement(
+				slack.OptTypeStatic,
+				slack.NewTextBlockObject("plain_text", "操作を選択してください", false, false),
+				"in_channel_options",
+				InChannelOptions()...,
+			),
+			slack.NewButtonBlockElement(
+				"progress_summary_action",
+				"progress_summary_button",
+				slack.NewTextBlockObject("plain_text", "📊 進捗サマリを作成", false, false),
+			).WithStyle(slack.StylePrimary),
+		),
 	}
 
 }

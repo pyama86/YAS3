@@ -105,6 +105,58 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 			if err := h.createPostMortem(callback.Channel, callback.User); err != nil {
 				return fmt.Errorf("createPostMortem failed: %w", err)
 			}
+		case "progress_summary_action":
+			h.repository.UpdateMessage(
+				callback.Channel.ID,
+				callback.Message.Timestamp,
+				slack.MsgOptionBlocks(blocks.ProgressSummaryLoading()...),
+			)
+			if err := h.createProgressSummary(callback.Channel, callback.User); err != nil {
+				return fmt.Errorf("createProgressSummary failed: %w", err)
+			}
+		case "report_post_action":
+			if err := h.postToReportChannel(callback.Channel, callback.User, callback.Message); err != nil {
+				return fmt.Errorf("postToReportChannel failed: %w", err)
+			}
+		// 確認フォームのボタン処理
+		case "progress_summary_execute":
+			// 確認メッセージを削除
+			h.repository.DeleteMessage(callback.Channel.ID, callback.Message.Timestamp)
+			// 作成中メッセージを新規投稿
+			_, loadingMsgTS, err := h.repository.PostMessage(
+				callback.Channel.ID,
+				slack.MsgOptionBlocks(blocks.ProgressSummaryLoading()...),
+			)
+			if err != nil {
+				return fmt.Errorf("failed to post loading message: %w", err)
+			}
+			// サマリ作成処理を実行し、作成中メッセージを更新
+			if err := h.createProgressSummaryWithUpdate(callback.Channel, callback.User, loadingMsgTS); err != nil {
+				return fmt.Errorf("createProgressSummary failed: %w", err)
+			}
+		case "progress_summary_cancel":
+			// 確認メッセージを削除
+			h.repository.DeleteMessage(callback.Channel.ID, callback.Message.Timestamp)
+		case "recovery_execute":
+			// 確認メッセージを削除
+			h.repository.DeleteMessage(callback.Channel.ID, callback.Message.Timestamp)
+			// 復旧処理を実行
+			if err := h.recoveryIncident(callback.User.ID, callback.Channel.ID); err != nil {
+				return fmt.Errorf("recoveryIncident failed: %w", err)
+			}
+		case "recovery_cancel":
+			// 確認メッセージを削除
+			h.repository.DeleteMessage(callback.Channel.ID, callback.Message.Timestamp)
+		case "timekeeper_stop_execute":
+			// 確認メッセージを削除
+			h.repository.DeleteMessage(callback.Channel.ID, callback.Message.Timestamp)
+			// タイムキーパー停止処理を実行
+			if err := h.stopTimeKeeper(callback.Channel.ID, callback.User.ID); err != nil {
+				return fmt.Errorf("stopTimeKeeper failed: %w", err)
+			}
+		case "timekeeper_stop_cancel":
+			// 確認メッセージを削除
+			h.repository.DeleteMessage(callback.Channel.ID, callback.Message.Timestamp)
 		case "in_channel_options":
 			if action.BlockID == "keeper_action" {
 				currentBlocks := callback.Message.Blocks.BlockSet
@@ -127,9 +179,11 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 			switch callback.ActionCallback.BlockActions[0].SelectedOption.Value {
 			case "recovery_incident":
 				slog.Info("recovery_incident", slog.Any("channelID", callback.Channel.ID))
-				if err := h.recoveryIncident(callback.User.ID, callback.Channel.ID); err != nil {
-					return fmt.Errorf("recoveryIncident failed: %w", err)
-				}
+				// 確認フォームを表示
+				h.repository.PostMessage(
+					callback.Channel.ID,
+					slack.MsgOptionBlocks(blocks.RecoveryConfirmation()...),
+				)
 
 			case "reopen_incident":
 				slog.Info("reopen_incident", slog.Any("channelID", callback.Channel.ID))
@@ -139,9 +193,11 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 
 			case "stop_timekeeper":
 				slog.Info("stop_timekeeper", slog.Any("channelID", callback.Channel.ID))
-				if err := h.stopTimeKeeper(callback.Channel.ID, callback.User.ID); err != nil {
-					return fmt.Errorf("stopTimeKeeper failed: %w", err)
-				}
+				// 確認フォームを表示
+				h.repository.PostMessage(
+					callback.Channel.ID,
+					slack.MsgOptionBlocks(blocks.TimekeeperStopConfirmation()...),
+				)
 			case "set_incident_level":
 				slog.Info("set_incident_level", slog.Any("channelID", callback.Channel.ID))
 				h.showIncidentLevelButtons(callback.Channel.ID)
@@ -155,6 +211,13 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				if err := h.showPostMortemButton(callback.Channel.ID); err != nil {
 					return fmt.Errorf("showPostMortemButton failed: %w", err)
 				}
+			case "create_progress_summary":
+				slog.Info("create_progress_summary", slog.Any("channelID", callback.Channel.ID))
+				// 確認フォームを表示
+				h.repository.PostMessage(
+					callback.Channel.ID,
+					slack.MsgOptionBlocks(blocks.ProgressSummaryConfirmation()...),
+				)
 			}
 
 		}
@@ -1013,6 +1076,357 @@ func (h *CallbackHandler) reopenIncident(userID, channelID string) error {
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
 		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
 	}
+
+	return nil
+}
+
+// 進捗サマリを作成する
+func (h *CallbackHandler) createProgressSummary(channel slack.Channel, user slack.User) error {
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, channel.ID)
+	if err != nil {
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+
+	if incident == nil {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("❌ このチャンネルにはインシデントが見つかりません", false),
+		)
+		return nil
+	}
+
+	// チャンネルメッセージを収集
+	messages, err := h.collectChannelMessages(channel.ID, incident)
+	if err != nil {
+		return fmt.Errorf("failed to collect channel messages: %w", err)
+	}
+
+	if len(messages) == 0 {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("❌ 分析できるメッセージがありません", false),
+		)
+		return nil
+	}
+
+	// AIで進捗サマリを生成（高度な分割処理対応）
+	summary, err := h.aiRepository.SummarizeProgressAdvanced(
+		incident.Description,
+		messages,
+		incident.LastSummary,
+	)
+	if err != nil {
+		// フォールバック: 従来の方式でピンメッセージのみ使用
+		return h.createProgressSummaryFallback(channel, incident)
+	}
+
+	// サマリを表示
+	_, _, err = h.repository.PostMessage(
+		channel.ID,
+		slack.MsgOptionBlocks(blocks.ProgressSummary(summary)...),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to post progress summary: %w", err)
+	}
+
+	// インシデントにサマリ情報を保存
+	err = h.updateIncidentSummary(incident, summary, messages)
+	if err != nil {
+		slog.Error("Failed to update incident summary", slog.Any("err", err))
+		// エラーでも続行（サマリ表示は成功したため）
+	}
+
+	return nil
+}
+
+// チャンネルメッセージを収集
+func (h *CallbackHandler) collectChannelMessages(channelID string, incident *entity.Incident) ([]slack.Message, error) {
+	// 前回処理済みのタイムスタンプ以降のメッセージを取得
+	var messages []slack.Message
+	var err error
+
+	if incident.LastProcessedMessageTS != "" {
+		// 増分更新: 前回以降のメッセージのみ
+		messages, err = h.repository.GetChannelMessagesAfter(channelID, incident.LastProcessedMessageTS)
+	} else {
+		// 初回作成: インシデント開始以降の全メッセージ
+		oldest := fmt.Sprintf("%.6f", float64(incident.StartedAt.Unix()))
+		messages, err = h.repository.GetChannelHistory(channelID, oldest, "", 1000)
+
+		// スレッドも収集
+		for _, msg := range messages {
+			if msg.ThreadTimestamp != "" && msg.ThreadTimestamp == msg.Timestamp {
+				replies, replyErr := h.repository.GetThreadReplies(channelID, msg.Timestamp)
+				if replyErr == nil {
+					// 元メッセージ以外の返信を追加
+					for _, reply := range replies {
+						if reply.Timestamp != msg.Timestamp {
+							messages = append(messages, reply)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// メッセージを時系列でソート
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].Timestamp < messages[j].Timestamp
+	})
+
+	return messages, nil
+}
+
+// インシデントのサマリ情報を更新
+func (h *CallbackHandler) updateIncidentSummary(incident *entity.Incident, summary string, messages []slack.Message) error {
+	now := time.Now()
+	incident.LastSummary = summary
+	incident.LastSummaryAt = now
+
+	// 最後に処理したメッセージのタイムスタンプを更新
+	if len(messages) > 0 {
+		incident.LastProcessedMessageTS = messages[len(messages)-1].Timestamp
+	}
+
+	return h.repository.SaveIncident(h.ctx, incident)
+}
+
+// フォールバック用のサマリ作成（従来の方式）
+func (h *CallbackHandler) createProgressSummaryFallback(channel slack.Channel, incident *entity.Incident) error {
+	slog.Warn("Using fallback progress summary method", slog.String("channelID", channel.ID))
+
+	// ピンメッセージを取得
+	pinnedMessages, err := h.repository.GetPinnedMessages(channel.ID)
+	if err != nil {
+		return fmt.Errorf("failed to GetPinnedMessages: %w", err)
+	}
+
+	// Slackメッセージを整形してタイムラインとして渡す
+	var timeline strings.Builder
+	for _, msg := range pinnedMessages {
+		timeline.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+	}
+
+	// AIで進捗サマリを生成（従来の方式）
+	summary, err := h.aiRepository.SummarizeProgress(incident.Description, timeline.String())
+	if err != nil {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("❌ 進捗サマリの生成に失敗しました", false),
+		)
+		return fmt.Errorf("failed to SummarizeProgress: %w", err)
+	}
+
+	// サマリを表示
+	_, _, err = h.repository.PostMessage(
+		channel.ID,
+		slack.MsgOptionBlocks(blocks.ProgressSummary(summary)...),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to post progress summary: %w", err)
+	}
+
+	return nil
+}
+
+// 報告チャンネルに投稿する
+func (h *CallbackHandler) postToReportChannel(channel slack.Channel, user slack.User, message slack.Message) error {
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, channel.ID)
+	if err != nil {
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+
+	if incident == nil {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("❌ このチャンネルにはインシデントが見つかりません", false),
+		)
+		return nil
+	}
+
+	service, err := h.repository.ServiceByID(h.ctx, incident.ServiceID)
+	if err != nil {
+		return fmt.Errorf("failed to ServiceByID: %w", err)
+	}
+
+	// アナウンスチャンネルの有無を確認
+	hasAnnouncementChannels := len(service.AnnouncementChannels) > 0
+	if h.config != nil {
+		hasAnnouncementChannels = hasAnnouncementChannels || len(h.config.GetGlobalAnnouncementChannels(h.ctx)) > 0
+	}
+
+	if !hasAnnouncementChannels {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("❌ アナウンスチャンネルが設定されていません", false),
+		)
+		return nil
+	}
+
+	// メッセージブロックからサマリ部分を抽出
+	var summaryText string
+	var summaryParts []string
+
+	for _, block := range message.Blocks.BlockSet {
+		if sectionBlock, ok := block.(*slack.SectionBlock); ok {
+			if sectionBlock.Text != nil && sectionBlock.Text.Type == "mrkdwn" {
+				text := sectionBlock.Text.Text
+				// ヘッダーブロック、ボタンブロック、区切り線は除外
+				if text != "" && !strings.Contains(text, "進捗サマリ") && !strings.Contains(text, "報告chに投稿") {
+					summaryParts = append(summaryParts, text)
+				}
+			}
+		}
+	}
+
+	// 全てのセクションを結合してサマリテキストを作成
+	if len(summaryParts) > 0 {
+		summaryText = strings.Join(summaryParts, "\n\n")
+	}
+
+	if summaryText == "" {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("❌ 投稿するサマリが見つかりません", false),
+		)
+		return nil
+	}
+
+	// 既存のbroadCastAnnouncement機能を使用してアナウンスチャンネルに投稿
+	attachment := slack.Attachment{
+		Color:  "#36a64f",
+		Blocks: slack.Blocks{BlockSet: blocks.ProgressSummaryAnnouncement(summaryText, channel.ID, service)},
+	}
+
+	if err := h.broadCastAnnouncement(channel.ID, attachment, service); err != nil {
+		h.repository.PostMessage(
+			channel.ID,
+			slack.MsgOptionText("❌ アナウンスチャンネルへの投稿に失敗しました", false),
+		)
+		return fmt.Errorf("failed to broadcast progress summary: %w", err)
+	}
+
+	// 投稿成功を通知
+	h.repository.PostMessage(
+		channel.ID,
+		slack.MsgOptionBlocks(blocks.ReportPostSuccess("アナウンスチャンネル")...),
+	)
+
+	return nil
+}
+
+// 進捗サマリを作成し、指定されたメッセージを更新する
+func (h *CallbackHandler) createProgressSummaryWithUpdate(channel slack.Channel, user slack.User, updateMsgTS string) error {
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, channel.ID)
+	if err != nil {
+		// エラーメッセージで作成中メッセージを更新
+		h.repository.UpdateMessage(
+			channel.ID,
+			updateMsgTS,
+			slack.MsgOptionText("❌ インシデント情報の取得に失敗しました", false),
+		)
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+
+	if incident == nil {
+		h.repository.UpdateMessage(
+			channel.ID,
+			updateMsgTS,
+			slack.MsgOptionText("❌ このチャンネルにはインシデントが見つかりません", false),
+		)
+		return nil
+	}
+
+	// チャンネルメッセージを収集
+	messages, err := h.collectChannelMessages(channel.ID, incident)
+	if err != nil {
+		h.repository.UpdateMessage(
+			channel.ID,
+			updateMsgTS,
+			slack.MsgOptionText("❌ メッセージの収集に失敗しました", false),
+		)
+		return fmt.Errorf("failed to collect channel messages: %w", err)
+	}
+
+	if len(messages) == 0 {
+		h.repository.UpdateMessage(
+			channel.ID,
+			updateMsgTS,
+			slack.MsgOptionText("❌ 分析できるメッセージがありません", false),
+		)
+		return nil
+	}
+
+	// AIで進捗サマリを生成（高度な分割処理対応）
+	summary, err := h.aiRepository.SummarizeProgressAdvanced(
+		incident.Description,
+		messages,
+		incident.LastSummary,
+	)
+	if err != nil {
+		// フォールバック: 従来の方式でピンメッセージのみ使用
+		return h.createProgressSummaryFallbackWithUpdate(channel, incident, updateMsgTS)
+	}
+
+	// サマリを表示（作成中メッセージを更新）
+	h.repository.UpdateMessage(
+		channel.ID,
+		updateMsgTS,
+		slack.MsgOptionBlocks(blocks.ProgressSummary(summary)...),
+	)
+
+	// インシデントにサマリ情報を保存
+	err = h.updateIncidentSummary(incident, summary, messages)
+	if err != nil {
+		slog.Error("Failed to update incident summary", slog.Any("err", err))
+		// エラーでも続行（サマリ表示は成功したため）
+	}
+
+	return nil
+}
+
+// フォールバック用のサマリ作成（作成中メッセージ更新版）
+func (h *CallbackHandler) createProgressSummaryFallbackWithUpdate(channel slack.Channel, incident *entity.Incident, updateMsgTS string) error {
+	slog.Warn("Using fallback progress summary method", slog.String("channelID", channel.ID))
+
+	// ピンメッセージを取得
+	pinnedMessages, err := h.repository.GetPinnedMessages(channel.ID)
+	if err != nil {
+		h.repository.UpdateMessage(
+			channel.ID,
+			updateMsgTS,
+			slack.MsgOptionText("❌ ピンメッセージの取得に失敗しました", false),
+		)
+		return fmt.Errorf("failed to GetPinnedMessages: %w", err)
+	}
+
+	// Slackメッセージを整形してタイムラインとして渡す
+	var timeline strings.Builder
+	for _, msg := range pinnedMessages {
+		timeline.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+	}
+
+	// AIで進捗サマリを生成（従来の方式）
+	summary, err := h.aiRepository.SummarizeProgress(incident.Description, timeline.String())
+	if err != nil {
+		h.repository.UpdateMessage(
+			channel.ID,
+			updateMsgTS,
+			slack.MsgOptionText("❌ 進捗サマリの生成に失敗しました", false),
+		)
+		return fmt.Errorf("failed to SummarizeProgress: %w", err)
+	}
+
+	// サマリを表示（作成中メッセージを更新）
+	h.repository.UpdateMessage(
+		channel.ID,
+		updateMsgTS,
+		slack.MsgOptionBlocks(blocks.ProgressSummary(summary)...),
+	)
 
 	return nil
 }

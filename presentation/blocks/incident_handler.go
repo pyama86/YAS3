@@ -27,23 +27,23 @@ func AcceptIncidentHandler(userID string) []slack.Block {
 		slack.NewRichTextBlock("ハンドラの役割",
 			slack.NewRichTextList(slack.RTEListOrdered, 0,
 				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("状況を迅速に把握し、初動対応を行う", nil),
+					slack.NewRichTextSectionTextElement("1. 状況を迅速に把握し、初動対応を行う。", nil),
 				),
 				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("事象レベルを判断し、設定する", nil),
+					slack.NewRichTextSectionTextElement("2. 事象レベルを判断し、設定する", nil),
 				),
 
 				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("チームに明確な指示を出し、統率を取る", nil),
+					slack.NewRichTextSectionTextElement("3. 調査や作業を行う作業者を招集してください", nil),
 				),
 				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("最新情報を適時共有し、ステークホルダーと連携する", nil),
+					slack.NewRichTextSectionTextElement("4. 作業者に明確な指示を出し、統率を取る", nil),
 				),
 				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("問題解決に向けたアクションプランを策定する", nil),
+					slack.NewRichTextSectionTextElement("5. 最新情報を適時共有し、ステークホルダーと連携する", nil),
 				),
 				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("進捗状況を継続的に報告し、必要な支援を要請する", nil),
+					slack.NewRichTextSectionTextElement("6. 問題解決に向けたアクションプランを策定する", nil),
 				),
 			),
 		),

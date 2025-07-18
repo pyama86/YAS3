@@ -21,7 +21,7 @@ type SlackRepositoryer interface {
 	GetMemberIDs(name string) ([]string, error)
 	GetChannelByName(name string) (*slack.Channel, error)
 	GetChannelByID(channelID string) (*slack.Channel, error)
-	PostMessage(channelID string, opts ...slack.MsgOption)
+	PostMessage(channelID string, opts ...slack.MsgOption) (string, string, error)
 	UpdateMessage(channelID, ts string, opts ...slack.MsgOption)
 	DeleteMessage(channelID, ts string)
 	OpenView(triggerID string, view slack.ModalViewRequest) error
@@ -29,6 +29,9 @@ type SlackRepositoryer interface {
 	SetTopicOfConversation(channelID, topic string) error
 	InviteUsersToConversation(channelID string, users ...string) error
 	GetPinnedMessages(channelID string) ([]slack.Message, error)
+	GetChannelHistory(channelID, oldest, latest string, limit int) ([]slack.Message, error)
+	GetThreadReplies(channelID, threadTS string) ([]slack.Message, error)
+	GetChannelMessagesAfter(channelID, afterTS string) ([]slack.Message, error)
 	GetUserPreferredName(user *slack.User) string
 	UploadFile(workspackeURL, userID, channelID, filename, title, content string) (string, error)
 	FlushChannelCache()
@@ -246,19 +249,26 @@ func (h *SlackRepository) GetChannelByName(name string) (*slack.Channel, error) 
 	return nil, nil
 }
 
-func (h *SlackRepository) PostMessage(channelID string, opts ...slack.MsgOption) {
-	go func() {
-		err := retry.Retry(10, 3*time.Second, func() error {
-			_, _, err := h.client.PostMessage(channelID, opts...)
-			if err != nil {
-				slog.Warn("PostMessage", slog.Any("channelID", channelID), slog.Any("err", err))
-			}
-			return err
-		})
+func (h *SlackRepository) PostMessage(channelID string, opts ...slack.MsgOption) (string, string, error) {
+	var channel, ts string
+	var resultErr error
+
+	err := retry.Retry(10, 3*time.Second, func() error {
+		c, t, err := h.client.PostMessage(channelID, opts...)
 		if err != nil {
-			slog.Error("Failed to PostMessage", slog.Any("err", err))
+			slog.Warn("PostMessage", slog.Any("channelID", channelID), slog.Any("err", err))
+			return err
 		}
-	}()
+		channel, ts = c, t
+		return nil
+	})
+
+	if err != nil {
+		slog.Error("Failed to PostMessage", slog.Any("err", err))
+		resultErr = err
+	}
+
+	return channel, ts, resultErr
 }
 
 func (h *SlackRepository) UpdateMessage(channelID, ts string, opts ...slack.MsgOption) {
@@ -447,4 +457,137 @@ func (h *SlackRepository) UploadFile(workspackeURL, userID, channelID, filename,
 		return "", err
 	}
 	return fmt.Sprintf("%s/files/%s/%s", workspackeURL, userID, f.ID), nil
+}
+
+// チャンネルの履歴を取得
+func (h *SlackRepository) GetChannelHistory(channelID, oldest, latest string, limit int) ([]slack.Message, error) {
+	var history *slack.History
+	var err error
+
+	err = retry.Retry(3, time.Second*3, func() error {
+		params := &slack.GetConversationHistoryParameters{
+			ChannelID: channelID,
+			Limit:     limit,
+		}
+		if oldest != "" {
+			params.Oldest = oldest
+		}
+		if latest != "" {
+			params.Latest = latest
+		}
+
+		resp, err := h.client.GetConversationHistory(params)
+		if err == nil {
+			history = &slack.History{Messages: resp.Messages}
+		}
+		if err != nil {
+			slog.Warn("GetChannelHistory", slog.Any("channelID", channelID), slog.Any("err", err))
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get channel history: %w", err)
+	}
+
+	// ボットメッセージやシステムメッセージをフィルタリング
+	var messages []slack.Message
+	for _, msg := range history.Messages {
+		// ボットメッセージを除外
+		if msg.BotID != "" || msg.SubType == "bot_message" {
+			continue
+		}
+		// システムメッセージを除外
+		if msg.SubType == "channel_join" || msg.SubType == "channel_leave" {
+			continue
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+// スレッドの返信を取得
+func (h *SlackRepository) GetThreadReplies(channelID, threadTS string) ([]slack.Message, error) {
+	var msgs []slack.Message
+	var err error
+
+	err = retry.Retry(3, time.Second*3, func() error {
+		msgs, _, _, err = h.client.GetConversationReplies(&slack.GetConversationRepliesParameters{
+			ChannelID: channelID,
+			Timestamp: threadTS,
+		})
+		if err != nil {
+			slog.Warn("GetThreadReplies", slog.Any("channelID", channelID), slog.Any("threadTS", threadTS), slog.Any("err", err))
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get thread replies: %w", err)
+	}
+
+	// ボットメッセージやシステムメッセージをフィルタリング
+	var messages []slack.Message
+	for _, msg := range msgs {
+		// ボットメッセージを除外
+		if msg.BotID != "" || msg.SubType == "bot_message" {
+			continue
+		}
+		// システムメッセージを除外
+		if msg.SubType == "channel_join" || msg.SubType == "channel_leave" {
+			continue
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+// 指定タイムスタンプ以降のチャンネルメッセージを取得
+func (h *SlackRepository) GetChannelMessagesAfter(channelID, afterTS string) ([]slack.Message, error) {
+	var allMessages []slack.Message
+
+	for {
+		history, err := h.GetChannelHistory(channelID, afterTS, "", 200)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(history) == 0 {
+			break
+		}
+
+		// 各メッセージにスレッドがあるかチェックして、スレッドも取得
+		for _, msg := range history {
+			allMessages = append(allMessages, msg)
+
+			// スレッドがある場合は返信も取得
+			if msg.ThreadTimestamp != "" && msg.ThreadTimestamp == msg.Timestamp {
+				replies, err := h.GetThreadReplies(channelID, msg.Timestamp)
+				if err != nil {
+					slog.Warn("Failed to get thread replies", slog.Any("err", err))
+					continue
+				}
+				// 元メッセージ以外の返信を追加
+				for _, reply := range replies {
+					if reply.Timestamp != msg.Timestamp {
+						allMessages = append(allMessages, reply)
+					}
+				}
+			}
+		}
+
+		// 200件未満の場合は最後のページ
+		if len(history) < 200 {
+			break
+		}
+
+		// 次のページのために最後のメッセージのタイムスタンプを設定
+		afterTS = history[len(history)-1].Timestamp
+	}
+
+	return allMessages, nil
 }
