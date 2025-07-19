@@ -251,11 +251,29 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				}
 			}
 		case "cancel_action":
-			// キャンセルボタンが押された場合、メッセージを削除
+			// キャンセルボタンが押された場合、メッセージを削除してキャンセル通知を表示
 			h.repository.DeleteMessage(
 				callback.Channel.ID,
 				callback.Message.Timestamp,
 			)
+
+			// キャンセル通知メッセージを投稿
+			msgOptions := []slack.MsgOption{
+				slack.MsgOptionText("❌ キャンセルしました", false),
+			}
+
+			// スレッド内でキャンセルした場合はスレッドに返信
+			if callback.Message.ThreadTimestamp != "" {
+				msgOptions = append(msgOptions, slack.MsgOptionTS(callback.Message.ThreadTimestamp))
+			}
+
+			_, _, err := h.repository.PostMessage(
+				callback.Channel.ID,
+				msgOptions...,
+			)
+			if err != nil {
+				slog.Error("Failed to post cancel message", slog.Any("err", err))
+			}
 
 		}
 	case slack.InteractionTypeViewSubmission:
