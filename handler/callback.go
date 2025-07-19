@@ -1898,7 +1898,7 @@ func (h *CallbackHandler) unlinkFromIncident(callback *slack.InteractionCallback
 	}
 
 	var foundIncident *entity.Incident
-	var linkIndex int = -1
+	var linkIndex = -1
 
 	for i, incident := range incidents {
 		for j, linked := range incident.LinkedChannels {

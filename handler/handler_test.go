@@ -49,6 +49,94 @@ func (m *mockIncidentRepo) ActiveIncidents(_ context.Context) ([]entity.Incident
 	return m.active, nil
 }
 
+type mockSlackRepo struct{}
+
+func (m *mockSlackRepo) GetChannelByID(channelID string) (*slack.Channel, error) {
+	return &slack.Channel{
+		GroupConversation: slack.GroupConversation{
+			Conversation: slack.Conversation{
+				ID: channelID,
+			},
+			Name:       "test-channel",
+			IsArchived: false,
+		},
+	}, nil
+}
+
+func (m *mockSlackRepo) GetChannelByName(name string) (*slack.Channel, error) {
+	return &slack.Channel{
+		GroupConversation: slack.GroupConversation{
+			Conversation: slack.Conversation{
+				ID: "C123456",
+			},
+			Name:       name,
+			IsArchived: false,
+		},
+	}, nil
+}
+
+func (m *mockSlackRepo) PostMessage(channelID string, options ...slack.MsgOption) (string, string, error) {
+	return channelID, "123456.789", nil
+}
+
+func (m *mockSlackRepo) UpdateMessage(channelID, timestamp string, options ...slack.MsgOption) {}
+
+func (m *mockSlackRepo) DeleteMessage(channelID, timestamp string) {}
+
+func (m *mockSlackRepo) OpenView(triggerID string, view slack.ModalViewRequest) error {
+	return nil
+}
+
+func (m *mockSlackRepo) CreateConversation(params slack.CreateConversationParams) (*slack.Channel, error) {
+	return &slack.Channel{}, nil
+}
+
+func (m *mockSlackRepo) SetTopicOfConversation(channelID, topic string) error {
+	return nil
+}
+
+func (m *mockSlackRepo) InviteUsersToConversation(channelID string, users ...string) error {
+	return nil
+}
+
+func (m *mockSlackRepo) GetMemberIDs(member string) ([]string, error) {
+	return []string{member}, nil
+}
+
+func (m *mockSlackRepo) FlushChannelCache() {}
+
+func (m *mockSlackRepo) GetPinnedMessages(channelID string) ([]slack.Message, error) {
+	return []slack.Message{}, nil
+}
+
+func (m *mockSlackRepo) GetUserByID(userID string) (*slack.User, error) {
+	return &slack.User{ID: userID, Name: "testuser"}, nil
+}
+
+func (m *mockSlackRepo) GetUserPreferredName(user *slack.User) string {
+	return user.Name
+}
+
+func (m *mockSlackRepo) UploadFile(workspaceURL, userID, channelID, filename, title, content string) (string, error) {
+	return "http://example.com/file", nil
+}
+
+func (m *mockSlackRepo) GetChannelHistory(channelID, oldest, latest string, limit int) ([]slack.Message, error) {
+	return []slack.Message{}, nil
+}
+
+func (m *mockSlackRepo) GetChannelMessagesAfter(channelID, after string) ([]slack.Message, error) {
+	return []slack.Message{}, nil
+}
+
+func (m *mockSlackRepo) GetThreadReplies(channelID, threadTS string) ([]slack.Message, error) {
+	return []slack.Message{}, nil
+}
+
+func (m *mockSlackRepo) GetSlackID(name string) (string, error) {
+	return "U123456", nil
+}
+
 type mockConfigRepo struct {
 	services []entity.Service
 	levels   []entity.IncidentLevel
@@ -208,7 +296,11 @@ func TestEventHandler_Handle(t *testing.T) {
 	incRepo := &mockIncidentRepo{data: map[string]*entity.Incident{
 		"CINC": {ChannelID: "CINC"},
 	}}
-	evHandler := handler.NewEventHandler(context.Background(), api, incRepo)
+	cfgRepo := &mockConfigRepo{}
+	slackRepo := &mockSlackRepo{}
+	repo := repository.NewRepository(incRepo, cfgRepo, cfgRepo, slackRepo)
+	config := &repository.Config{} // 空のConfig構造体
+	evHandler := handler.NewEventHandler(context.Background(), api, repo, config)
 
 	tests := []struct {
 		name     string
