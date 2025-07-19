@@ -28,16 +28,7 @@ func IncidentReportRequest(userID string) []slack.Block {
 					slack.NewRichTextSectionTextElement("事象内容を共有してください", nil),
 				),
 				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("ユーザー対応やお知らせは必要そうですか？", nil),
-				),
-				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("原因はわかっていますか？", nil),
-				),
-				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("復旧目処は立っていますか？", nil),
-				),
-				slack.NewRichTextSection(
-					slack.NewRichTextSectionTextElement("インシデントレベルを設定してください。現在は影響なしに設定されています", nil),
+					slack.NewRichTextSectionTextElement("インシデントレベルを必要なら設定してください。現在は影響なしに設定されています", nil),
 				),
 			),
 		),

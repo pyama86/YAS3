@@ -16,11 +16,18 @@ func IncidentMenu() []slack.Block {
 			nil,
 			nil,
 		),
-		slack.NewActionBlock("in_channel_action", slack.NewOptionsSelectBlockElement(
-			slack.OptTypeStatic,
-			slack.NewTextBlockObject("plain_text", "操作を選択してください", false, false),
-			"in_channel_options",
-			InChannelOptions()...,
-		)),
+		slack.NewActionBlock("in_channel_action",
+			slack.NewOptionsSelectBlockElement(
+				slack.OptTypeStatic,
+				slack.NewTextBlockObject("plain_text", "操作を選択してください", false, false),
+				"in_channel_options",
+				InChannelOptions()...,
+			),
+			slack.NewButtonBlockElement(
+				"cancel_action",
+				"cancel_button",
+				slack.NewTextBlockObject("plain_text", "❌ キャンセル", false, false),
+			),
+		),
 	}
 }

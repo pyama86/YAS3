@@ -74,6 +74,7 @@ func Handle(ctx context.Context, configPath string) error {
 		ctx,
 		webApi,
 		repo,
+		cfgRepository,
 	)
 
 	callbackHandler := NewCallbackHandler(

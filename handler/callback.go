@@ -118,6 +118,10 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 			if err := h.postToReportChannel(callback.Channel, callback.User, callback.Message); err != nil {
 				return fmt.Errorf("postToReportChannel failed: %w", err)
 			}
+			// 報告後にボタンを削除するため、メッセージを更新
+			if err := h.removeReportButtonFromMessage(callback.Channel.ID, callback.Message); err != nil {
+				return fmt.Errorf("failed to removeReportButtonFromMessage: %w", err)
+			}
 		// 確認フォームのボタン処理
 		case "progress_summary_execute":
 			// 確認メッセージを削除
@@ -229,6 +233,30 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				}
 			}
 
+		case "link_incident_options":
+			h.repository.DeleteMessage(
+				callback.Channel.ID,
+				callback.Message.Timestamp,
+			)
+			switch callback.ActionCallback.BlockActions[0].SelectedOption.Value {
+			case "link_to_incident":
+				slog.Info("link_to_incident", slog.Any("channelID", callback.Channel.ID))
+				if err := h.showActiveIncidentsList(callback); err != nil {
+					return fmt.Errorf("showActiveIncidentsList failed: %w", err)
+				}
+			case "unlink_from_incident":
+				slog.Info("unlink_from_incident", slog.Any("channelID", callback.Channel.ID))
+				if err := h.unlinkFromIncident(callback); err != nil {
+					return fmt.Errorf("unlinkFromIncident failed: %w", err)
+				}
+			}
+		case "cancel_action":
+			// キャンセルボタンが押された場合、メッセージを削除
+			h.repository.DeleteMessage(
+				callback.Channel.ID,
+				callback.Message.Timestamp,
+			)
+
 		}
 	case slack.InteractionTypeViewSubmission:
 		switch callback.View.CallbackID {
@@ -239,6 +267,10 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 		case "edit_summary_modal":
 			if err := h.submitEditSummaryModal(callback); err != nil {
 				return fmt.Errorf("submitEditSummaryModal failed: %w", err)
+			}
+		case "link_incident_modal":
+			if err := h.submitLinkIncidentModal(callback); err != nil {
+				return fmt.Errorf("submitLinkIncidentModal failed: %w", err)
 			}
 		}
 	}
@@ -267,7 +299,7 @@ func (h *CallbackHandler) submitHandler(userID, channelID string) error {
 		slack.MsgOptionBlocks(blocks.AcceptIncidentHandler(userID)...),
 	)
 	if err != nil {
-		slog.Error("Failed to post accept incident handler message", slog.Any("err", err))
+		return fmt.Errorf("failed to post accept incident handler message: %w", err)
 	}
 
 	return nil
@@ -435,7 +467,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 
 	// 共有チャンネルにお知らせを投稿
 	if err := h.broadCastAnnouncement(channel.ID, attachment, service); err != nil {
-		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
+		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
 	_, _, err = h.repository.PostMessage(
@@ -541,7 +573,7 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 	}
 
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
-		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
+		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
 	return nil
@@ -632,7 +664,7 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 	}
 
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
-		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
+		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
 	return nil
@@ -910,41 +942,95 @@ func parseSlackTimestamp(ts string) (time.Time, error) {
 }
 
 func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment slack.Attachment, service *entity.Service) error {
-	// インシデントを取得してスレッド管理情報を確認
+	// インシデントを取得して紐づけられたチャンネルを確認
 	incident, err := h.repository.FindIncidentByChannel(h.ctx, channelID)
 	if err != nil {
-		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
-	}
-	if incident == nil {
-		return fmt.Errorf("incident is nil")
+		slog.Error("failed to FindIncidentByChannel for linked channels", slog.Any("err", err))
 	}
 
-	// AnnouncementThreadsの初期化
-	if incident.AnnouncementThreads == nil {
-		incident.AnnouncementThreads = make(map[string]string)
+	// 投稿済みチャンネルを追跡して重複を防止
+	postedChannels := make(map[string]bool)
+
+	// 紐づけられたチャンネルに先に通知（重複防止のため）
+	if incident != nil && len(incident.LinkedChannels) > 0 {
+		for _, linked := range incident.LinkedChannels {
+			// スレッド紐づけの場合はスレッドのみに投稿、チャンネル紐づけの場合は重複チェック
+			if linked.ThreadTS != "" {
+				// スレッド紐づけ：スレッドに投稿（reply_broadcastを使用）
+				_, _, err := h.repository.PostMessage(
+					linked.ChannelID,
+					slack.MsgOptionAttachments(attachment),
+					slack.MsgOptionTS(linked.ThreadTS),
+					slack.MsgOptionBroadcast(),
+				)
+				if err != nil {
+					return fmt.Errorf("failed to post to linked thread %s: %w", linked.ChannelID, err)
+				}
+
+				// reply_broadcastでチャンネル全体にも表示されるため、そのチャンネルは投稿済みとしてマーク
+				postedChannels[linked.ChannelID] = true
+
+				// 成功を通知
+				linkedChannel, channelErr := h.repository.GetChannelByID(linked.ChannelID)
+				if channelErr == nil {
+					_, _, err = h.repository.PostMessage(
+						channelID,
+						slack.MsgOptionText(fmt.Sprintf("🔗 %s チャンネルの紐づけスレッドに通知しました", linkedChannel.Name), false),
+					)
+					if err != nil {
+						slog.Error("Failed to post linked thread notification message", slog.Any("err", err))
+					}
+				}
+			} else {
+				// チャンネル紐づけ：重複チェックしてからチャンネルに投稿
+				if postedChannels[linked.ChannelID] {
+					continue
+				}
+
+				_, _, err := h.repository.PostMessage(
+					linked.ChannelID,
+					slack.MsgOptionAttachments(attachment),
+				)
+				if err != nil {
+					return fmt.Errorf("failed to post to linked channel %s: %w", linked.ChannelID, err)
+				}
+
+				postedChannels[linked.ChannelID] = true
+
+				// 成功を通知
+				linkedChannel, channelErr := h.repository.GetChannelByID(linked.ChannelID)
+				if channelErr == nil {
+					_, _, err = h.repository.PostMessage(
+						channelID,
+						slack.MsgOptionText(fmt.Sprintf("🔗 %s チャンネルに通知しました", linkedChannel.Name), false),
+					)
+					if err != nil {
+						slog.Error("Failed to post linked channel notification message", slog.Any("err", err))
+					}
+				}
+			}
+		}
 	}
 
-	// アナウンスチャンネルをマージして重複を除去
-	channels := make(map[string]bool)
+	// アナウンスチャンネルをマージして重複を除去（紐づけ処理後に処理）
+	announceChannels := make(map[string]bool)
 
 	// サービス固有のアナウンスチャンネルを追加
 	if service != nil {
 		for _, c := range service.AnnouncementChannels {
-			channels[c] = true
+			announceChannels[c] = true
 		}
 	}
 
 	// グローバルアナウンスチャンネルを追加
 	if h.config != nil {
 		for _, c := range h.config.GetGlobalAnnouncementChannels(h.ctx) {
-			channels[c] = true
+			announceChannels[c] = true
 		}
 	}
 
-	needsUpdate := false
-
-	// マージしたチャンネルに通知
-	for c := range channels {
+	// アナウンスチャンネルに通知（重複チェック済み）
+	for c := range announceChannels {
 		cinfo, err := h.repository.GetChannelByName(c)
 		if err != nil {
 			slog.Error("failed to GetChannelByName", slog.Any("err", err), slog.Any("channel", c))
@@ -954,52 +1040,27 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 			continue
 		}
 
-		existingTS, exists := incident.AnnouncementThreads[cinfo.ID]
-
-		if !exists || existingTS == "" {
-			// 初回投稿: 通常のメッセージとして投稿
-			_, ts, err := h.repository.PostMessage(
-				cinfo.ID,
-				slack.MsgOptionAttachments(attachment),
-			)
-			if err != nil {
-				slog.Error("Failed to post initial announcement", slog.Any("err", err), slog.Any("channel", cinfo.Name))
-			} else {
-				// タイムスタンプを保存
-				incident.AnnouncementThreads[cinfo.ID] = ts
-				needsUpdate = true
-				slog.Info("Posted initial announcement", slog.Any("channel", cinfo.Name), slog.Any("ts", ts))
-			}
-		} else {
-			// 2回目以降: スレッド返信＋reply_broadcastで投稿
-			_, _, err := h.repository.PostMessage(
-				cinfo.ID,
-				slack.MsgOptionAttachments(attachment),
-				slack.MsgOptionTS(existingTS),
-				slack.MsgOptionBroadcast(),
-			)
-			if err != nil {
-				slog.Error("Failed to post thread reply announcement", slog.Any("err", err), slog.Any("channel", cinfo.Name))
-			} else {
-				slog.Info("Posted thread reply announcement", slog.Any("channel", cinfo.Name), slog.Any("thread_ts", existingTS))
-			}
+		// 既に投稿済みでないかチェック
+		if postedChannels[cinfo.ID] {
+			continue
 		}
 
-		// インシデントチャンネルに通知メッセージを投稿
+		_, _, err = h.repository.PostMessage(
+			cinfo.ID,
+			slack.MsgOptionAttachments(attachment),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to post announcement to channel %s: %w", cinfo.Name, err)
+		}
+
+		postedChannels[cinfo.ID] = true
+
 		_, _, err = h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
 		)
 		if err != nil {
 			slog.Error("Failed to post notification message", slog.Any("err", err))
-		}
-	}
-
-	// インシデントを更新（新しいスレッドタイムスタンプが保存された場合のみ）
-	if needsUpdate {
-		if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
-			slog.Error("Failed to update incident with announcement threads", slog.Any("err", err))
-			return fmt.Errorf("failed to save incident: %w", err)
 		}
 	}
 
@@ -1108,7 +1169,7 @@ func (h *CallbackHandler) submitEditSummaryModal(callback *slack.InteractionCall
 	}
 
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
-		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
+		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
 	return nil
@@ -1196,7 +1257,7 @@ func (h *CallbackHandler) reopenIncident(userID, channelID string) error {
 	}
 
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
-		slog.Error("failed to broadCastAnnouncement", slog.Any("err", err))
+		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
 	return nil
@@ -1574,5 +1635,396 @@ func (h *CallbackHandler) createProgressSummaryFallbackWithUpdate(channel slack.
 		slack.MsgOptionBlocks(blocks.ProgressSummary(summary)...),
 	)
 
+	return nil
+}
+
+// アクティブなインシデント一覧を表示するモーダルを開く
+func (h *CallbackHandler) showActiveIncidentsList(callback *slack.InteractionCallback) error {
+	// アクティブなインシデント（復旧していない）を取得
+	incidents, err := h.repository.ActiveIncidents(h.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to ActiveIncidents: %w", err)
+	}
+
+	if len(incidents) == 0 {
+		_, _, err := h.repository.PostMessage(
+			callback.Channel.ID,
+			slack.MsgOptionText("現在アクティブなインシデントはありません", false),
+		)
+		if err != nil {
+			slog.Error("Failed to post no active incidents message", slog.Any("err", err))
+		}
+		return nil
+	}
+
+	// インシデントを新しい順にソート（未解決のものを優先）
+	sort.Slice(incidents, func(i, j int) bool {
+		return incidents[i].StartedAt.After(incidents[j].StartedAt)
+	})
+
+	// インシデント選択用のオプションを作成
+	var options []*slack.OptionBlockObject
+	for _, incident := range incidents {
+		service, err := h.repository.ServiceByID(h.ctx, incident.ServiceID)
+		if err != nil {
+			continue
+		}
+
+		channel, err := h.repository.GetChannelByID(incident.ChannelID)
+		if err != nil {
+			continue
+		}
+
+		// アーカイブ済みのチャンネルは除外
+		if channel.IsArchived {
+			continue
+		}
+
+		// インシデントの概要を作成
+		description := fmt.Sprintf("%s - %s", service.Name, incident.Description)
+		if len(description) > 75 {
+			description = description[:72] + "..."
+		}
+
+		options = append(options, slack.NewOptionBlockObject(
+			incident.ChannelID, // valueとしてチャンネルIDを使用
+			slack.NewTextBlockObject("plain_text", fmt.Sprintf("#%s", channel.Name), false, false),
+			slack.NewTextBlockObject("plain_text", description, false, false),
+		))
+	}
+
+	// 紐づけ可能なインシデントがない場合
+	if len(options) == 0 {
+		_, _, err := h.repository.PostMessage(
+			callback.Channel.ID,
+			slack.MsgOptionText("紐づけ可能なアクティブなインシデントはありません", false),
+		)
+		if err != nil {
+			slog.Error("Failed to post no linkable incidents message", slog.Any("err", err))
+		}
+		return nil
+	}
+
+	// モーダルを作成
+	titleText := slack.NewTextBlockObject("plain_text", "🔗 インシデント選択", false, false)
+	submitText := slack.NewTextBlockObject("plain_text", "✅ 紐づける", false, false)
+	closeText := slack.NewTextBlockObject("plain_text", "❌ キャンセル", false, false)
+
+	// コールバック情報をprivate_metadataに保存（スレッドタイムスタンプを含む）
+	var threadTS string
+	if callback.Message.ThreadTimestamp != "" {
+		// スレッド内のメッセージの場合
+		threadTS = callback.Message.ThreadTimestamp
+	}
+	// チャンネル直接の場合はthreadTSは空文字列のまま
+	metadata := fmt.Sprintf("%s|%s", callback.Channel.ID, threadTS)
+
+	view := slack.ModalViewRequest{
+		Type:       slack.ViewType("modal"),
+		Title:      titleText,
+		CallbackID: "link_incident_modal",
+		Submit:     submitText,
+		Close:      closeText,
+		Blocks: slack.Blocks{
+			BlockSet: []slack.Block{
+				slack.NewSectionBlock(
+					slack.NewTextBlockObject(
+						"mrkdwn",
+						"紐づけたいインシデントを選択してください:",
+						false,
+						false,
+					),
+					nil,
+					nil,
+				),
+				slack.NewActionBlock(
+					"incident_select_action",
+					slack.NewOptionsSelectBlockElement(
+						slack.OptTypeStatic,
+						slack.NewTextBlockObject("plain_text", "インシデントを選択", false, false),
+						"incident_select",
+						options...,
+					),
+				),
+			},
+		},
+		PrivateMetadata: metadata,
+	}
+
+	err = h.repository.OpenView(callback.TriggerID, view)
+	if err != nil {
+		return fmt.Errorf("failed to OpenView: %w", err)
+	}
+
+	return nil
+}
+
+// インシデント紐づけモーダルの送信処理
+func (h *CallbackHandler) submitLinkIncidentModal(callback *slack.InteractionCallback) error {
+	// private_metadataから元のチャンネル情報を取得
+	metadata := callback.View.PrivateMetadata
+	parts := strings.Split(metadata, "|")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid private metadata format")
+	}
+
+	linkChannelID := parts[0]
+	linkThreadTS := parts[1] // メッセージまたはスレッドのタイムスタンプ
+
+	// スレッドかチャンネルかを判定し、適切なThreadTSを設定
+	// linkThreadTSが空文字列でない場合のみスレッド紐づけとして扱う
+	actualThreadTS := linkThreadTS
+
+	// 選択されたインシデントチャンネルIDを取得
+	incidentChannelID := callback.View.State.Values["incident_select_action"]["incident_select"].SelectedOption.Value
+
+	// インシデントを取得
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, incidentChannelID)
+	if err != nil {
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+	if incident == nil {
+		return fmt.Errorf("incident not found")
+	}
+
+	// 既に紐づけられていないかチェック
+	for _, linked := range incident.LinkedChannels {
+		if linked.ChannelID == linkChannelID && linked.ThreadTS == actualThreadTS {
+			var msgText string
+			if actualThreadTS != "" {
+				msgText = "このスレッドは既にインシデントに紐づけられています"
+			} else {
+				msgText = "このチャンネルは既にインシデントに紐づけられています"
+			}
+
+			msgOptions := []slack.MsgOption{
+				slack.MsgOptionText(msgText, false),
+			}
+			if actualThreadTS != "" {
+				msgOptions = append(msgOptions, slack.MsgOptionTS(actualThreadTS))
+			}
+
+			_, _, err := h.repository.PostMessage(linkChannelID, msgOptions...)
+			if err != nil {
+				return fmt.Errorf("failed to post already linked message: %w", err)
+			}
+			return nil
+		}
+	}
+
+	// 新しい紐づけを追加
+	if incident.LinkedChannels == nil {
+		incident.LinkedChannels = []entity.LinkedChannel{}
+	}
+
+	incident.LinkedChannels = append(incident.LinkedChannels, entity.LinkedChannel{
+		ChannelID: linkChannelID,
+		ThreadTS:  actualThreadTS,
+	})
+
+	// インシデントを保存
+	if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
+		return fmt.Errorf("failed to SaveIncident: %w", err)
+	}
+
+	// 紐づけ成功メッセージを投稿
+	incidentChannel, err := h.repository.GetChannelByID(incidentChannelID)
+	if err != nil {
+		return fmt.Errorf("failed to GetChannelByID: %w", err)
+	}
+
+	// 紐づけ成功メッセージを送信
+	var successMsgText string
+	if actualThreadTS != "" {
+		successMsgText = fmt.Sprintf("✅ このスレッドをインシデント <#%s> に紐づけました。今後のインシデント更新がここにも通知されます。", incidentChannelID)
+	} else {
+		successMsgText = fmt.Sprintf("✅ このチャンネルをインシデント <#%s> に紐づけました。今後のインシデント更新がここにも通知されます。", incidentChannelID)
+	}
+
+	msgOptions := []slack.MsgOption{
+		slack.MsgOptionText(successMsgText, false),
+	}
+	if actualThreadTS != "" {
+		msgOptions = append(msgOptions, slack.MsgOptionTS(actualThreadTS))
+	}
+
+	_, _, err = h.repository.PostMessage(linkChannelID, msgOptions...)
+	if err != nil {
+		return fmt.Errorf("failed to post link success message: %w", err)
+	}
+
+	// インシデントチャンネルにも通知
+	linkChannel, err := h.repository.GetChannelByID(linkChannelID)
+	if err != nil {
+		return fmt.Errorf("failed to GetChannelByID: %w", err)
+	}
+
+	// インシデントチャンネルへの通知メッセージ
+	var notifyMsgText string
+	if actualThreadTS != "" {
+		notifyMsgText = fmt.Sprintf("🔗 <#%s> のスレッドがこのインシデントに紐づけられました", linkChannelID)
+	} else {
+		notifyMsgText = fmt.Sprintf("🔗 <#%s> がこのインシデントに紐づけられました", linkChannelID)
+	}
+
+	_, _, err = h.repository.PostMessage(
+		incidentChannelID,
+		slack.MsgOptionText(notifyMsgText, false),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to post link notification to incident channel: %w", err)
+	}
+
+	slog.Info("Successfully linked channel to incident",
+		slog.Any("incidentChannel", incidentChannel.Name),
+		slog.Any("linkedChannel", linkChannel.Name),
+		slog.Any("threadTS", actualThreadTS))
+
+	return nil
+}
+
+// インシデントから紐づけを解除する
+func (h *CallbackHandler) unlinkFromIncident(callback *slack.InteractionCallback) error {
+	channelID := callback.Channel.ID
+	var threadTS string
+	if callback.Message.ThreadTimestamp != "" {
+		threadTS = callback.Message.ThreadTimestamp
+	}
+
+	// 全てのアクティブなインシデントから該当の紐づけを検索・削除
+	incidents, err := h.repository.ActiveIncidents(h.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to ActiveIncidents: %w", err)
+	}
+
+	var foundIncident *entity.Incident
+	var linkIndex int = -1
+
+	for i, incident := range incidents {
+		for j, linked := range incident.LinkedChannels {
+			if linked.ChannelID == channelID && linked.ThreadTS == threadTS {
+				foundIncident = &incidents[i]
+				linkIndex = j
+				break
+			}
+		}
+		if foundIncident != nil {
+			break
+		}
+	}
+
+	if foundIncident == nil {
+		var msgText string
+		if threadTS != "" {
+			msgText = "このスレッドはインシデントに紐づけられていません"
+		} else {
+			msgText = "このチャンネルはインシデントに紐づけられていません"
+		}
+
+		msgOptions := []slack.MsgOption{
+			slack.MsgOptionText(msgText, false),
+		}
+		if threadTS != "" {
+			msgOptions = append(msgOptions, slack.MsgOptionTS(threadTS))
+		}
+
+		_, _, err := h.repository.PostMessage(channelID, msgOptions...)
+		if err != nil {
+			return fmt.Errorf("failed to post not linked message: %w", err)
+		}
+		return nil
+	}
+
+	// 紐づけを削除
+	foundIncident.LinkedChannels = append(
+		foundIncident.LinkedChannels[:linkIndex],
+		foundIncident.LinkedChannels[linkIndex+1:]...,
+	)
+
+	// インシデントを保存
+	if err := h.repository.SaveIncident(h.ctx, foundIncident); err != nil {
+		return fmt.Errorf("failed to SaveIncident: %w", err)
+	}
+
+	// 解除成功メッセージを送信
+	incidentChannel, err := h.repository.GetChannelByID(foundIncident.ChannelID)
+	if err != nil {
+		return fmt.Errorf("failed to GetChannelByID: %w", err)
+	}
+
+	var successMsgText string
+	if threadTS != "" {
+		successMsgText = fmt.Sprintf("✅ このスレッドとインシデント <#%s> の紐づけを解除しました", foundIncident.ChannelID)
+	} else {
+		successMsgText = fmt.Sprintf("✅ このチャンネルとインシデント <#%s> の紐づけを解除しました", foundIncident.ChannelID)
+	}
+
+	// 解除成功メッセージのみを表示（メニューは再表示しない）
+	msgOptions := []slack.MsgOption{
+		slack.MsgOptionText(successMsgText, false),
+	}
+	if threadTS != "" {
+		msgOptions = append(msgOptions, slack.MsgOptionTS(threadTS))
+	}
+
+	_, _, err = h.repository.PostMessage(channelID, msgOptions...)
+	if err != nil {
+		slog.Error("Failed to post unlink success message", slog.Any("err", err))
+	}
+
+	// インシデントチャンネルにも通知
+	var notifyMsgText string
+	if threadTS != "" {
+		notifyMsgText = fmt.Sprintf("🔓 <#%s> のスレッドの紐づけが解除されました", channelID)
+	} else {
+		notifyMsgText = fmt.Sprintf("🔓 <#%s> の紐づけが解除されました", channelID)
+	}
+
+	_, _, err = h.repository.PostMessage(
+		foundIncident.ChannelID,
+		slack.MsgOptionText(notifyMsgText, false),
+	)
+	if err != nil {
+		slog.Error("Failed to post unlink notification to incident channel", slog.Any("err", err))
+	}
+
+	slog.Info("Successfully unlinked channel from incident",
+		slog.Any("incidentChannel", incidentChannel.Name),
+		slog.Any("unlinkedChannel", channelID),
+		slog.Any("threadTS", threadTS))
+
+	return nil
+}
+
+// 報告ボタンをメッセージから削除する
+func (h *CallbackHandler) removeReportButtonFromMessage(channelID string, message slack.Message) error {
+	var newBlocks []slack.Block
+
+	for _, block := range message.Blocks.BlockSet {
+		// 報告ボタンを含むアクションブロックをスキップ
+		if actionBlock, ok := block.(*slack.ActionBlock); ok {
+			hasReportButton := false
+			for _, element := range actionBlock.Elements.ElementSet {
+				if buttonElement, ok := element.(*slack.ButtonBlockElement); ok {
+					if buttonElement.ActionID == "report_post_action" {
+						hasReportButton = true
+						break
+					}
+				}
+			}
+			// 報告ボタンを含むアクションブロックは除外
+			if hasReportButton {
+				continue
+			}
+		}
+		newBlocks = append(newBlocks, block)
+	}
+
+	// メッセージを更新
+	h.repository.UpdateMessage(
+		channelID,
+		message.Timestamp,
+		slack.MsgOptionBlocks(newBlocks...),
+	)
 	return nil
 }

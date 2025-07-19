@@ -7,9 +7,11 @@ import (
 )
 
 func CheckPoint(elapsedStr string) []slack.Block {
+	blocks := []slack.Block{}
 
-	return []slack.Block{
-		slack.NewSectionBlock(
+	// 0時間0分の場合はチェックポイントメッセージを表示しない
+	if elapsedStr != "0時間0分" {
+		blocks = append(blocks, slack.NewSectionBlock(
 			slack.NewTextBlockObject(
 				"mrkdwn",
 				fmt.Sprintf(
@@ -20,7 +22,10 @@ func CheckPoint(elapsedStr string) []slack.Block {
 			),
 			nil,
 			nil,
-		),
+		))
+	}
+
+	blocks = append(blocks,
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject(
 				"mrkdwn",
@@ -44,6 +49,7 @@ func CheckPoint(elapsedStr string) []slack.Block {
 				slack.NewTextBlockObject("plain_text", "📊 進捗サマリを作成", false, false),
 			).WithStyle(slack.StylePrimary),
 		),
-	}
+	)
 
+	return blocks
 }
