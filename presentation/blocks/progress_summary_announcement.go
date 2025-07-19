@@ -2,6 +2,7 @@ package blocks
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/pyama86/YAS3/domain/entity"
 	"github.com/slack-go/slack"
@@ -20,7 +21,7 @@ func ProgressSummaryAnnouncement(summary, incidentChannelID string, service *ent
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject(
 				"mrkdwn",
-				fmt.Sprintf("**サービス**: %s\n**インシデントチャンネル**: <#%s>", serviceName, incidentChannelID),
+				fmt.Sprintf("*サービス*: %s\n*インシデントチャンネル*: <#%s>", serviceName, incidentChannelID),
 				false,
 				false,
 			),
@@ -31,7 +32,7 @@ func ProgressSummaryAnnouncement(summary, incidentChannelID string, service *ent
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject(
 				"mrkdwn",
-				summary,
+				convertMarkdownToSlack(summary),
 				false,
 				false,
 			),
@@ -39,4 +40,9 @@ func ProgressSummaryAnnouncement(summary, incidentChannelID string, service *ent
 			nil,
 		),
 	}
+}
+
+// マークダウンの**太字**をSlackの*太字*に変換
+func convertMarkdownToSlack(text string) string {
+	return regexp.MustCompile(`\*\*(.*?)\*\*`).ReplaceAllString(text, "*$1*")
 }

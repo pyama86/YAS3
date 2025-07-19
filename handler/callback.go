@@ -910,6 +910,20 @@ func parseSlackTimestamp(ts string) (time.Time, error) {
 }
 
 func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment slack.Attachment, service *entity.Service) error {
+	// インシデントを取得してスレッド管理情報を確認
+	incident, err := h.repository.FindIncidentByChannel(h.ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("failed to FindIncidentByChannel: %w", err)
+	}
+	if incident == nil {
+		return fmt.Errorf("incident is nil")
+	}
+
+	// AnnouncementThreadsの初期化
+	if incident.AnnouncementThreads == nil {
+		incident.AnnouncementThreads = make(map[string]string)
+	}
+
 	// アナウンスチャンネルをマージして重複を除去
 	channels := make(map[string]bool)
 
@@ -927,6 +941,8 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 		}
 	}
 
+	needsUpdate := false
+
 	// マージしたチャンネルに通知
 	for c := range channels {
 		cinfo, err := h.repository.GetChannelByName(c)
@@ -938,13 +954,38 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 			continue
 		}
 
-		_, _, err = h.repository.PostMessage(
-			cinfo.ID,
-			slack.MsgOptionAttachments(attachment),
-		)
-		if err != nil {
-			slog.Error("Failed to post announcement attachment", slog.Any("err", err))
+		existingTS, exists := incident.AnnouncementThreads[cinfo.ID]
+
+		if !exists || existingTS == "" {
+			// 初回投稿: 通常のメッセージとして投稿
+			_, ts, err := h.repository.PostMessage(
+				cinfo.ID,
+				slack.MsgOptionAttachments(attachment),
+			)
+			if err != nil {
+				slog.Error("Failed to post initial announcement", slog.Any("err", err), slog.Any("channel", cinfo.Name))
+			} else {
+				// タイムスタンプを保存
+				incident.AnnouncementThreads[cinfo.ID] = ts
+				needsUpdate = true
+				slog.Info("Posted initial announcement", slog.Any("channel", cinfo.Name), slog.Any("ts", ts))
+			}
+		} else {
+			// 2回目以降: スレッド返信＋reply_broadcastで投稿
+			_, _, err := h.repository.PostMessage(
+				cinfo.ID,
+				slack.MsgOptionAttachments(attachment),
+				slack.MsgOptionTS(existingTS),
+				slack.MsgOptionBroadcast(),
+			)
+			if err != nil {
+				slog.Error("Failed to post thread reply announcement", slog.Any("err", err), slog.Any("channel", cinfo.Name))
+			} else {
+				slog.Info("Posted thread reply announcement", slog.Any("channel", cinfo.Name), slog.Any("thread_ts", existingTS))
+			}
 		}
+
+		// インシデントチャンネルに通知メッセージを投稿
 		_, _, err = h.repository.PostMessage(
 			channelID,
 			slack.MsgOptionText(fmt.Sprintf("📢 %s チャンネルに通知しました", cinfo.Name), false),
@@ -953,6 +994,15 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 			slog.Error("Failed to post notification message", slog.Any("err", err))
 		}
 	}
+
+	// インシデントを更新（新しいスレッドタイムスタンプが保存された場合のみ）
+	if needsUpdate {
+		if err := h.repository.SaveIncident(h.ctx, incident); err != nil {
+			slog.Error("Failed to update incident with announcement threads", slog.Any("err", err))
+			return fmt.Errorf("failed to save incident: %w", err)
+		}
+	}
+
 	return nil
 }
 
