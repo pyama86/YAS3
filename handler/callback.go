@@ -658,7 +658,7 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 	}
 
 	color := "#36a64f"
-	if levelInt > 0 {
+	if levelInt > 0 && incident.RecoveredAt.IsZero() {
 		color = "#f2c744"
 	}
 	attachment := slack.Attachment{
@@ -669,6 +669,7 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 				description,
 				channelID,
 				service,
+				!incident.RecoveredAt.IsZero(),
 			),
 		},
 	}
@@ -1181,9 +1182,13 @@ func (h *CallbackHandler) submitEditSummaryModal(callback *slack.InteractionCall
 	}
 
 	// 周知チャンネルに通知
+	color := "#f2c744"
+	if !incident.RecoveredAt.IsZero() {
+		color = "#36a64f"
+	}
 	attachment := slack.Attachment{
-		Color:  "#f2c744",
-		Blocks: slack.Blocks{BlockSet: blocks.IncidentSummaryUpdated(oldSummary, summaryText, channelID, service)},
+		Color:  color,
+		Blocks: slack.Blocks{BlockSet: blocks.IncidentSummaryUpdated(oldSummary, summaryText, channelID, service, !incident.RecoveredAt.IsZero())},
 	}
 
 	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {

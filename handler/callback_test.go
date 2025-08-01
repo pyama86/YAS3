@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pyama86/YAS3/domain/entity"
 	"github.com/pyama86/YAS3/domain/repository"
 	"github.com/pyama86/YAS3/presentation/blocks"
 	"github.com/slack-go/slack"
@@ -207,16 +208,16 @@ func TestProgressSummaryBlocks(t *testing.T) {
 - ログ解析を完了`
 
 	// Slackブロックに変換
-	blocks := blocks.ProgressSummary(summaryText)
+	blockList := blocks.ProgressSummary(summaryText)
 
 	// ブロックが生成されていることを確認
-	if len(blocks) == 0 {
+	if len(blockList) == 0 {
 		t.Error("Expected blocks to be generated")
 	}
 
 	// ヘッダーブロックが含まれていることを確認
 	hasHeader := false
-	for _, block := range blocks {
+	for _, block := range blockList {
 		if headerBlock, ok := block.(*slack.HeaderBlock); ok {
 			if headerBlock.Text.Text == "📊 進捗サマリ" {
 				hasHeader = true
@@ -230,7 +231,7 @@ func TestProgressSummaryBlocks(t *testing.T) {
 
 	// ボタンブロックが含まれていることを確認
 	hasButton := false
-	for _, block := range blocks {
+	for _, block := range blockList {
 		if actionBlock, ok := block.(*slack.ActionBlock); ok {
 			if actionBlock.BlockID == "report_post_action" {
 				hasButton = true
@@ -244,7 +245,7 @@ func TestProgressSummaryBlocks(t *testing.T) {
 
 	// 太字変換が正しく動作することを確認
 	hasBoldFormatting := false
-	for _, block := range blocks {
+	for _, block := range blockList {
 		if sectionBlock, ok := block.(*slack.SectionBlock); ok {
 			if sectionBlock.Text != nil && strings.Contains(sectionBlock.Text.Text, "*事象の簡潔な説明*") {
 				hasBoldFormatting = true
@@ -265,13 +266,13 @@ func TestProgressSummaryReportExtraction(t *testing.T) {
 - **事象の簡潔な説明**: APIサーバーが応答停止
 - **影響レベル**: 高`
 
-	blocks := blocks.ProgressSummary(summaryText)
+	blockList := blocks.ProgressSummary(summaryText)
 
 	// Slackメッセージを模擬
 	mockMessage := slack.Message{
 		Msg: slack.Msg{
 			Blocks: slack.Blocks{
-				BlockSet: blocks,
+				BlockSet: blockList,
 			},
 		},
 	}
@@ -345,5 +346,107 @@ func TestConfirmationBlocks(t *testing.T) {
 		if !hasActionBlock {
 			t.Error("Expected action block with buttons in confirmation form")
 		}
+	}
+}
+
+func TestIncidentLevelUpdatedBlocks(t *testing.T) {
+	t.Setenv("TEST_MODE", "true")
+
+	// テスト用のサービスエンティティ
+	service := &entity.Service{
+		Name: "TestService",
+	}
+
+	// 復旧済みでない場合のテスト
+	blockList := blocks.IncidentLevelUpdated("APIサーバー障害", "高", "channel123", service, false)
+
+	if len(blockList) == 0 {
+		t.Error("Expected blocks to be generated for non-recovered incident")
+	}
+
+	// タイトルが適切に設定されているかチェック
+	found := false
+	for _, block := range blockList {
+		if sectionBlock, ok := block.(*slack.SectionBlock); ok {
+			if sectionBlock.Text != nil && strings.Contains(sectionBlock.Text.Text, "🚨 事象レベルが変更されました") {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected normal title for non-recovered incident")
+	}
+
+	// 復旧済みの場合のテスト
+	recoveredBlocks := blocks.IncidentLevelUpdated("APIサーバー障害", "高", "channel123", service, true)
+
+	if len(recoveredBlocks) == 0 {
+		t.Error("Expected blocks to be generated for recovered incident")
+	}
+
+	// 復旧済み表示がされているかチェック
+	foundRecovered := false
+	for _, block := range recoveredBlocks {
+		if sectionBlock, ok := block.(*slack.SectionBlock); ok {
+			if sectionBlock.Text != nil && strings.Contains(sectionBlock.Text.Text, "✅【復旧済み】事象レベルが変更されました") {
+				foundRecovered = true
+				break
+			}
+		}
+	}
+	if !foundRecovered {
+		t.Error("Expected recovered title for recovered incident")
+	}
+}
+
+func TestIncidentSummaryUpdatedBlocks(t *testing.T) {
+	t.Setenv("TEST_MODE", "true")
+
+	// テスト用のサービスエンティティ
+	service := &entity.Service{
+		Name: "TestService",
+	}
+
+	// 復旧済みでない場合のテスト
+	blockList := blocks.IncidentSummaryUpdated("古い事象内容", "新しい事象内容", "channel123", service, false)
+
+	if len(blockList) == 0 {
+		t.Error("Expected blocks to be generated for non-recovered incident")
+	}
+
+	// タイトルが適切に設定されているかチェック
+	found := false
+	for _, block := range blockList {
+		if sectionBlock, ok := block.(*slack.SectionBlock); ok {
+			if sectionBlock.Text != nil && strings.Contains(sectionBlock.Text.Text, "📝 事象内容が変更されました") {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected normal title for non-recovered incident")
+	}
+
+	// 復旧済みの場合のテスト
+	recoveredBlocks := blocks.IncidentSummaryUpdated("古い事象内容", "新しい事象内容", "channel123", service, true)
+
+	if len(recoveredBlocks) == 0 {
+		t.Error("Expected blocks to be generated for recovered incident")
+	}
+
+	// 復旧済み表示がされているかチェック
+	foundRecovered := false
+	for _, block := range recoveredBlocks {
+		if sectionBlock, ok := block.(*slack.SectionBlock); ok {
+			if sectionBlock.Text != nil && strings.Contains(sectionBlock.Text.Text, "✅【復旧済み】事象内容が変更されました") {
+				foundRecovered = true
+				break
+			}
+		}
+	}
+	if !foundRecovered {
+		t.Error("Expected recovered title for recovered incident")
 	}
 }

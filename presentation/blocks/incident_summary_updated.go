@@ -7,10 +7,14 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func IncidentSummaryUpdated(oldSummary, newSummary, channelID string, service *entity.Service) []slack.Block {
+func IncidentSummaryUpdated(oldSummary, newSummary, channelID string, service *entity.Service, isRecovered bool) []slack.Block {
+	titleText := "📝 事象内容が変更されました"
+	if isRecovered {
+		titleText = "✅【復旧済み】事象内容が変更されました"
+	}
 	return []slack.Block{
 		slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn", "📝 事象内容が変更されました", false, false),
+			slack.NewTextBlockObject("mrkdwn", titleText, false, false),
 			[]*slack.TextBlockObject{
 				slack.NewTextBlockObject(
 					"mrkdwn",
