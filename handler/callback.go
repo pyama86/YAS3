@@ -484,7 +484,7 @@ func (h *CallbackHandler) submitIncidentModal(callback *slack.InteractionCallbac
 	}
 
 	// 共有チャンネルにお知らせを投稿
-	if err := h.broadCastAnnouncement(channel.ID, attachment, service); err != nil {
+	if err := h.broadCastAnnouncement(channel.ID, attachment, service, true); err != nil {
 		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
@@ -590,7 +590,7 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 		)},
 	}
 
-	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
+	if err := h.broadCastAnnouncement(channelID, attachment, service, false); err != nil {
 		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
@@ -682,7 +682,7 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 		slog.Error("Failed to post incident level changed message", slog.Any("err", err))
 	}
 
-	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
+	if err := h.broadCastAnnouncement(channelID, attachment, service, false); err != nil {
 		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
@@ -960,7 +960,7 @@ func parseSlackTimestamp(ts string) (time.Time, error) {
 	return time.Unix(sec, nsec).In(loc), nil
 }
 
-func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment slack.Attachment, service *entity.Service) error {
+func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment slack.Attachment, service *entity.Service, addHere bool) error {
 	// インシデントを取得して紐づけられたチャンネルを確認
 	incident, err := h.repository.FindIncidentByChannel(h.ctx, channelID)
 	if err != nil {
@@ -1064,10 +1064,13 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 			continue
 		}
 
-		_, _, err = h.repository.PostMessage(
-			cinfo.ID,
-			slack.MsgOptionAttachments(attachment),
-		)
+		var msgOptions []slack.MsgOption
+		if addHere {
+			msgOptions = append(msgOptions, slack.MsgOptionText("<!here>", false))
+		}
+		msgOptions = append(msgOptions, slack.MsgOptionAttachments(attachment))
+
+		_, _, err = h.repository.PostMessage(cinfo.ID, msgOptions...)
 		if err != nil {
 			return fmt.Errorf("failed to post announcement to channel %s: %w", cinfo.Name, err)
 		}
@@ -1191,7 +1194,7 @@ func (h *CallbackHandler) submitEditSummaryModal(callback *slack.InteractionCall
 		Blocks: slack.Blocks{BlockSet: blocks.IncidentSummaryUpdated(oldSummary, summaryText, channelID, service, !incident.RecoveredAt.IsZero())},
 	}
 
-	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
+	if err := h.broadCastAnnouncement(channelID, attachment, service, false); err != nil {
 		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
@@ -1279,7 +1282,7 @@ func (h *CallbackHandler) reopenIncident(userID, channelID string) error {
 		)},
 	}
 
-	if err := h.broadCastAnnouncement(channelID, attachment, service); err != nil {
+	if err := h.broadCastAnnouncement(channelID, attachment, service, false); err != nil {
 		return fmt.Errorf("failed to broadCastAnnouncement: %w", err)
 	}
 
@@ -1526,7 +1529,7 @@ func (h *CallbackHandler) postToReportChannel(channel slack.Channel, user slack.
 		Blocks: slack.Blocks{BlockSet: blocks.ProgressSummaryAnnouncement(summaryText, channel.ID, service)},
 	}
 
-	if err := h.broadCastAnnouncement(channel.ID, attachment, service); err != nil {
+	if err := h.broadCastAnnouncement(channel.ID, attachment, service, false); err != nil {
 		_, _, postErr := h.repository.PostMessage(
 			channel.ID,
 			slack.MsgOptionText("❌ アナウンスチャンネルへの投稿に失敗しました", false),
