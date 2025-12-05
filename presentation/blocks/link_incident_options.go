@@ -6,6 +6,13 @@ import "github.com/slack-go/slack"
 func LinkIncidentOptions(isThread bool, isLinked bool) []*slack.OptionBlockObject {
 	var options []*slack.OptionBlockObject
 
+	// 未クローズインシデント一覧を最初に追加（常に表示）
+	options = append(options, slack.NewOptionBlockObject(
+		"list_open_incidents",
+		slack.NewTextBlockObject("plain_text", "📋 未クローズインシデント一覧", false, false),
+		nil,
+	))
+
 	if isLinked {
 		// 既に紐づけられている場合は解除オプションのみ表示
 		var unlinkText string

@@ -27,6 +27,7 @@ type AIRepositorier interface {
 	GenerateActionItems(description, slackMessages string) (string, error)
 	GenerateLessonsLearned(description, slackMessages string) (string, string, string, error) // うまくいったこと、うまくいかなかったこと、幸運だったこと
 	FormatTimeline(rawTimeline string) (string, error)
+	AnalyzeRemainingTasks(description, slackMessages string) (string, error)
 }
 
 type AIRepository struct {
@@ -642,6 +643,34 @@ func (h *AIRepository) FormatTimeline(rawTimeline string) (string, error) {
 
 ## 生のタイムライン
 %s`, rawTimeline)
+
+	return h.callOpenAIWithRetry(prompt)
+}
+
+// 残件分析
+func (h *AIRepository) AnalyzeRemainingTasks(description, slackMessages string) (string, error) {
+	prompt := fmt.Sprintf(`## 依頼内容
+インシデント対応の残件を分析してください。
+あなたには人間が考えた事象の概要と、Slackのメッセージが与えられます。
+
+## フォーマットの指定：
+200文字以内で、以下の観点から残件を記載してください：
+- まだ完了していない対応内容
+- 今後実施が必要な作業
+- 監視や確認が必要な項目
+- 対応待ちの課題
+
+**重要**: Slackメッセージから明確に残件が読み取れる場合のみ記載してください。
+情報が不十分な場合は「メッセージから残件を確認できませんでした」と返却してください。
+推測や仮定に基づく内容は含めないでください。
+
+あなたから受け取った文章はそのまま表示されるので、構造化文字列ではなく、残件の内容だけを返却してください。
+
+## 人間が考えた事象の概要
+%s
+
+## 関連するSlackのメッセージ
+%s`, description, slackMessages)
 
 	return h.callOpenAIWithRetry(prompt)
 }

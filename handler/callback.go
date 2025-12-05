@@ -239,6 +239,11 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				callback.Message.Timestamp,
 			)
 			switch callback.ActionCallback.BlockActions[0].SelectedOption.Value {
+			case "list_open_incidents":
+				slog.Info("list_open_incidents", slog.Any("channelID", callback.Channel.ID))
+				if err := h.listOpenIncidents(callback.Channel.ID, ""); err != nil {
+					return fmt.Errorf("listOpenIncidents failed: %w", err)
+				}
 			case "link_to_incident":
 				slog.Info("link_to_incident", slog.Any("channelID", callback.Channel.ID))
 				if err := h.showActiveIncidentsList(callback); err != nil {
@@ -2052,5 +2057,214 @@ func (h *CallbackHandler) removeReportButtonFromMessage(channelID string, messag
 		message.Timestamp,
 		slack.MsgOptionBlocks(newBlocks...),
 	)
+	return nil
+}
+
+// 未クローズインシデント一覧を表示する
+func (h *CallbackHandler) listOpenIncidents(channelID, threadTS string) error {
+	slog.Info("listOpenIncidents called", slog.String("channelID", channelID), slog.String("threadTS", threadTS))
+
+	incidents, err := h.repository.ActiveIncidents(h.ctx)
+	if err != nil {
+		slog.Error("failed to ActiveIncidents", slog.Any("err", err))
+		return fmt.Errorf("failed to ActiveIncidents: %w", err)
+	}
+
+	slog.Info("ActiveIncidents retrieved", slog.Int("count", len(incidents)))
+
+	if len(incidents) == 0 {
+		slog.Info("No open incidents, posting message")
+		msgOptions := []slack.MsgOption{
+			slack.MsgOptionText("現在、未クローズのインシデントはありません。", false),
+		}
+		if threadTS != "" {
+			msgOptions = append(msgOptions, slack.MsgOptionTS(threadTS))
+		}
+
+		_, _, err := h.repository.PostMessage(channelID, msgOptions...)
+		if err != nil {
+			slog.Error("failed to post no incidents message", slog.Any("err", err))
+			return fmt.Errorf("failed to post no incidents message: %w", err)
+		}
+		slog.Info("No incidents message posted successfully")
+		return nil
+	}
+
+	// インシデントを新しい順にソート
+	sort.Slice(incidents, func(i, j int) bool {
+		return incidents[i].StartedAt.After(incidents[j].StartedAt)
+	})
+
+	// 一覧表示の開始メッセージを投稿
+	headerMsg := fmt.Sprintf("📋 未クローズのインシデント一覧 (全%d件)", len(incidents))
+	slog.Info("Posting header message", slog.String("headerMsg", headerMsg))
+	msgOptions := []slack.MsgOption{
+		slack.MsgOptionText(headerMsg, false),
+	}
+	if threadTS != "" {
+		msgOptions = append(msgOptions, slack.MsgOptionTS(threadTS))
+	}
+
+	_, headerTS, err := h.repository.PostMessage(channelID, msgOptions...)
+	if err != nil {
+		slog.Error("failed to post header message", slog.Any("err", err))
+		return fmt.Errorf("failed to post header message: %w", err)
+	}
+	slog.Info("Header message posted successfully", slog.String("headerTS", headerTS))
+
+	// スレッド内で各インシデントを一件ずつ投稿
+	for i, incident := range incidents {
+		slog.Info("Posting incident detail", slog.Int("index", i+1), slog.String("channelID", incident.ChannelID))
+		if err := h.postIncidentDetail(channelID, headerTS, &incident, i+1); err != nil {
+			slog.Error("Failed to post incident detail", slog.Any("err", err), slog.Any("incident", incident.ChannelID))
+			continue
+		}
+	}
+
+	slog.Info("All incidents posted successfully")
+	return nil
+}
+
+// 個別のインシデント詳細を投稿する
+func (h *CallbackHandler) postIncidentDetail(channelID, threadTS string, incident *entity.Incident, index int) error {
+	service, err := h.repository.ServiceByID(h.ctx, incident.ServiceID)
+	if err != nil {
+		return fmt.Errorf("failed to ServiceByID: %w", err)
+	}
+
+	channel, err := h.repository.GetChannelByID(incident.ChannelID)
+	if err != nil {
+		return fmt.Errorf("failed to GetChannelByID: %w", err)
+	}
+
+	// アーカイブ済みのチャンネルはスキップ
+	if channel.IsArchived {
+		return nil
+	}
+
+	// インシデントレベルを取得
+	var levelDescription string
+	if incident.Level > 0 {
+		incidentLevel, err := h.repository.IncidentLevelByLevel(h.ctx, incident.Level)
+		if err == nil && incidentLevel != nil {
+			levelDescription = incidentLevel.Description
+		}
+	}
+	if levelDescription == "" {
+		levelDescription = "サービスに影響なし"
+	}
+
+	// 残件を分析（AIが利用可能な場合のみ）
+	var remainingTasks string
+	if h.aiRepository != nil {
+		// インシデント開始以降の全メッセージ（スレッド含む）を収集
+		messages, err := h.collectChannelMessages(incident.ChannelID, incident)
+		if err != nil {
+			slog.Error("Failed to collect channel messages", slog.Any("err", err))
+			remainingTasks = "チャンネルメッセージの取得に失敗しました"
+		} else if len(messages) == 0 {
+			remainingTasks = "チャンネルにメッセージがありません"
+		} else {
+			slog.Info("Collected messages for analysis", slog.Int("count", len(messages)))
+
+			// メッセージを整形
+			var formattedMessages strings.Builder
+			for _, msg := range messages {
+				formattedMessages.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+			}
+
+			// AI で残件分析
+			tasks, err := h.aiRepository.AnalyzeRemainingTasks(incident.Description, formattedMessages.String())
+			if err != nil {
+				slog.Error("Failed to analyze remaining tasks", slog.Any("err", err))
+				remainingTasks = "残件の分析に失敗しました"
+			} else {
+				remainingTasks = tasks
+			}
+		}
+	} else {
+		remainingTasks = "AI機能が無効のため分析できません"
+	}
+
+	// 復旧状態の確認
+	var statusEmoji string
+	var statusText string
+	if !incident.RecoveredAt.IsZero() {
+		statusEmoji = "✅"
+		statusText = "復旧済み（クローズ待ち）"
+	} else {
+		statusEmoji = "🚨"
+		statusText = "対応中"
+	}
+
+	// メッセージブロックを作成
+	blocks := []slack.Block{
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject(
+				"mrkdwn",
+				fmt.Sprintf("*%d. %s %s*", index, statusEmoji, channel.Name),
+				false,
+				false,
+			),
+			nil,
+			nil,
+		),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject(
+				"mrkdwn",
+				fmt.Sprintf("*サービス:* %s\n*ステータス:* %s\n*レベル:* %s",
+					service.Name,
+					statusText,
+					levelDescription,
+				),
+				false,
+				false,
+			),
+			nil,
+			nil,
+		),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject(
+				"mrkdwn",
+				fmt.Sprintf("*概要:*\n%s", incident.Description),
+				false,
+				false,
+			),
+			nil,
+			nil,
+		),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject(
+				"mrkdwn",
+				fmt.Sprintf("*残件:*\n%s", remainingTasks),
+				false,
+				false,
+			),
+			nil,
+			nil,
+		),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject(
+				"mrkdwn",
+				fmt.Sprintf("*チャンネル:* <#%s>", incident.ChannelID),
+				false,
+				false,
+			),
+			nil,
+			nil,
+		),
+		slack.NewDividerBlock(),
+	}
+
+	// スレッドに投稿
+	_, _, err = h.repository.PostMessage(
+		channelID,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionTS(threadTS),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to post incident detail: %w", err)
+	}
+
 	return nil
 }

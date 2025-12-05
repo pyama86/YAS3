@@ -86,6 +86,9 @@ func Handle(ctx context.Context, configPath string) error {
 		cfgRepository,
 	)
 
+	// EventHandlerにCallbackHandlerを設定
+	eventHandler.SetCallbackHandler(callbackHandler)
+
 	// 1分ごとに各インシデントの15分間隔チェックを確認
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()

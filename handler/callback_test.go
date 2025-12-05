@@ -70,6 +70,10 @@ func (m *mockAIRepository) FormatTimeline(rawTimeline string) (string, error) {
 	return "", nil
 }
 
+func (m *mockAIRepository) AnalyzeRemainingTasks(description, slackMessages string) (string, error) {
+	return "データベースの性能確認、監視アラートの閾値調整", nil
+}
+
 func TestSummarizeProgress(t *testing.T) {
 	t.Setenv("TEST_MODE", "true")
 
