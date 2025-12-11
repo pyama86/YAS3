@@ -827,7 +827,7 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 	lessonsBad := "例: 初期対応時の情報共有が不十分だった"
 	lessensLucky := "例: 障害発生がピーク時間外だったため影響が限定的だった"
 
-	postmortemFileTitle := fmt.Sprintf("postmortem-%s", channel.Name)
+	postmortemFileTitle := fmt.Sprintf("%s postmortem-%s", createdAt.Format("2006/01/02"), channel.Name)
 
 	if h.aiRepository != nil {
 		// タイトル生成
@@ -836,7 +836,7 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 			return fmt.Errorf("failed to GenerateTitle: %w", err)
 		}
 		title = t
-		postmortemFileTitle = fmt.Sprintf("postmortem-%s", t)
+		postmortemFileTitle = fmt.Sprintf("%s %s", createdAt.Format("2006/01/02"), t)
 
 		// サマリー生成
 		s, err := h.aiRepository.Summarize(incident.Description, formattedMessages)
