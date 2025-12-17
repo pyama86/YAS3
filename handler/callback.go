@@ -567,9 +567,16 @@ func (h *CallbackHandler) recoveryIncident(userID, channelID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to SetPurposeOfConversation: %w", err)
 	}
+
+	// 通知タイプを取得
+	notificationType := "here"
+	if h.config != nil {
+		notificationType = h.config.GetNotificationType()
+	}
+
 	attachment := slack.Attachment{
 		Color:  "#36a64f",
-		Blocks: slack.Blocks{BlockSet: blocks.IncidentRecovered(userID, incident.HandlerUserID)},
+		Blocks: slack.Blocks{BlockSet: blocks.IncidentRecovered(userID, incident.HandlerUserID, notificationType)},
 	}
 
 	_, _, err = h.repository.PostMessage(
@@ -679,9 +686,15 @@ func (h *CallbackHandler) setIncidentLevel(channelID, userID, level string) erro
 		},
 	}
 
+	// 通知タイプを取得
+	notificationType := "here"
+	if h.config != nil {
+		notificationType = h.config.GetNotificationType()
+	}
+
 	_, _, err = h.repository.PostMessage(
 		channelID,
-		slack.MsgOptionBlocks(blocks.IncidentLevelChanged(userID, description)...),
+		slack.MsgOptionBlocks(blocks.IncidentLevelChanged(userID, description, notificationType)...),
 	)
 	if err != nil {
 		slog.Error("Failed to post incident level changed message", slog.Any("err", err))
@@ -1070,8 +1083,18 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 		}
 
 		var msgOptions []slack.MsgOption
+		// 設定ファイルのnotification_typeに基づいて通知方法を決定
+		notificationType := "none"
+		if h.config != nil {
+			notificationType = h.config.GetNotificationType()
+		}
+
+		// addHereがtrueの場合のみ、notification_typeに従って通知を追加
 		if addHere {
-			msgOptions = append(msgOptions, slack.MsgOptionText("<!here>", false))
+			notificationText := blocks.AddNotification("", notificationType)
+			if notificationText != "" {
+				msgOptions = append(msgOptions, slack.MsgOptionText(notificationText, false))
+			}
 		}
 		msgOptions = append(msgOptions, slack.MsgOptionAttachments(attachment))
 
@@ -1257,10 +1280,16 @@ func (h *CallbackHandler) reopenIncident(userID, channelID string) error {
 		return fmt.Errorf("failed to SetTopicOfConversation: %w", err)
 	}
 
+	// 通知タイプを取得
+	notificationType := "here"
+	if h.config != nil {
+		notificationType = h.config.GetNotificationType()
+	}
+
 	// チャンネル内に再開通知
 	attachment := slack.Attachment{
 		Color:  "#ff0000",
-		Blocks: slack.Blocks{BlockSet: blocks.IncidentReopened(userID, incident.HandlerUserID)},
+		Blocks: slack.Blocks{BlockSet: blocks.IncidentReopened(userID, incident.HandlerUserID, notificationType)},
 	}
 
 	_, _, err = h.repository.PostMessage(

@@ -41,6 +41,7 @@ type Config struct {
 	ChannelPrefix              string                  `mapstructure:"channel_prefix"`
 	IncidentLevelList          []entity.IncidentLevel  `mapstructure:"incident_levels" validate:"required"`
 	DefaultConfluence          entity.ConfluenceConfig `mapstructure:"default_confluence"`
+	NotificationType           string                  `mapstructure:"notification_type" validate:"omitempty,oneof=none here channel"`
 }
 
 func (c *Config) Services(_ context.Context) ([]entity.Service, error) {
@@ -92,4 +93,13 @@ func (c *Config) IncidentLevelByLevel(_ context.Context, id int) (*entity.Incide
 
 func (c *Config) GetGlobalAnnouncementChannels(_ context.Context) []string {
 	return c.GlobalAnnouncementChannels
+}
+
+// GetNotificationType は設定された通知タイプを返す (none/here/channel)
+// 設定されていない場合は "here" をデフォルトとして返す
+func (c *Config) GetNotificationType() string {
+	if c.NotificationType == "" {
+		return "here"
+	}
+	return c.NotificationType
 }
