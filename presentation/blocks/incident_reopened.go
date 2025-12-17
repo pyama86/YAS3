@@ -7,14 +7,16 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func IncidentReopened(userID, handlerID string) []slack.Block {
+func IncidentReopened(userID, handlerID, notificationType string) []slack.Block {
+	notificationText := AddNotification("インシデントが再発し、対応を再開します。", notificationType)
+
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("<@%s> さんがインシデントを再開しました", userID), false, false),
 			nil, nil,
 		),
 		slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn", "<!here> インシデントが再発し、対応を再開します。", false, false),
+			slack.NewTextBlockObject("mrkdwn", notificationText, false, false),
 			nil, nil,
 		),
 	}

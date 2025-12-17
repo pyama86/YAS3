@@ -454,3 +454,51 @@ func TestIncidentSummaryUpdatedBlocks(t *testing.T) {
 		t.Error("Expected recovered title for recovered incident")
 	}
 }
+
+func TestGetNotificationType(t *testing.T) {
+	t.Setenv("TEST_MODE", "true")
+
+	tests := []struct {
+		name           string
+		config         *repository.Config
+		expectedResult string
+	}{
+		{
+			name: "notification_type が here の場合",
+			config: &repository.Config{
+				NotificationType: "here",
+			},
+			expectedResult: "here",
+		},
+		{
+			name: "notification_type が channel の場合",
+			config: &repository.Config{
+				NotificationType: "channel",
+			},
+			expectedResult: "channel",
+		},
+		{
+			name: "notification_type が none の場合",
+			config: &repository.Config{
+				NotificationType: "none",
+			},
+			expectedResult: "none",
+		},
+		{
+			name: "notification_type が未設定の場合はhereがデフォルト",
+			config: &repository.Config{
+				NotificationType: "",
+			},
+			expectedResult: "here",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.GetNotificationType()
+			if result != tt.expectedResult {
+				t.Errorf("Expected %s, got %s", tt.expectedResult, result)
+			}
+		})
+	}
+}

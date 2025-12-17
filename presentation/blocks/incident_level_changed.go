@@ -6,10 +6,12 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func IncidentLevelChanged(userID, incidentLevel string) []slack.Block {
+func IncidentLevelChanged(userID, incidentLevel, notificationType string) []slack.Block {
+	notificationText := AddNotification("インシデントレベルが変更されました", notificationType)
+
 	return []slack.Block{
 		slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn", "<!here> インシデントレベルが変更されました", false, false),
+			slack.NewTextBlockObject("mrkdwn", notificationText, false, false),
 			nil,
 			nil,
 		),

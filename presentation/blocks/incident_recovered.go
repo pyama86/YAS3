@@ -7,7 +7,9 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func IncidentRecovered(userID, handlerID string) []slack.Block {
+func IncidentRecovered(userID, handlerID, notificationType string) []slack.Block {
+	notificationText := AddNotification("インシデントが復旧しました。", notificationType)
+
 	return []slack.Block{
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("<@%s> さんがインシデントの復旧を宣言しました", userID), false, false),
@@ -15,7 +17,7 @@ func IncidentRecovered(userID, handlerID string) []slack.Block {
 			nil,
 		),
 		slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn", "<!here> インシデントが復旧しました。", false, false),
+			slack.NewTextBlockObject("mrkdwn", notificationText, false, false),
 			nil,
 			nil,
 		),
