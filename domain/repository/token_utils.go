@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -11,11 +12,21 @@ import (
 )
 
 const (
-	// GPT-4のトークン制限 (8K モデルの場合、安全マージンを設けて80%を使用)
-	MaxTokensGPT4 = 6400
+	// デフォルトのトークン制限（大規模コンテキストモデル向け）
+	DefaultMaxTokens = 200000
 	// 1つのメッセージあたりの平均トークン数の見積もり
 	AverageTokensPerMessage = 30
 )
+
+// GetMaxTokens は環境変数またはデフォルト値からトークン制限を取得
+func GetMaxTokens() int {
+	if envMaxTokens := os.Getenv("MAX_TOKENS"); envMaxTokens != "" {
+		if maxTokens, err := strconv.Atoi(envMaxTokens); err == nil && maxTokens > 0 {
+			return maxTokens
+		}
+	}
+	return DefaultMaxTokens
+}
 
 // トークン計算ユーティリティ
 type TokenCalculator struct {
