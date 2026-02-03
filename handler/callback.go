@@ -780,50 +780,50 @@ func (h *CallbackHandler) createPostMortem(channel slack.Channel, user slack.Use
 		return fmt.Errorf("failed to GetUserByID: %w", err)
 	}
 
-	pinnedMessages, err := h.repository.GetPinnedMessages(channel.ID)
+	// チャンネル全メッセージを取得（メンション変換済み）
+	slackMessages, err := h.repository.GetAllChannelMessages(channel.ID)
 	if err != nil {
-		return fmt.Errorf("failed to GetPinnedMessages: %w", err)
+		return fmt.Errorf("failed to GetAllChannelMessages: %w", err)
 	}
 
+	// メッセージを時系列順に並び替え
+	sort.Slice(slackMessages, func(i, j int) bool {
+		return slackMessages[i].Timestamp < slackMessages[j].Timestamp
+	})
+
+	// タイムラインの作成（インシデント開始〜復旧まで）
 	formattedMessages := fmt.Sprintf("- %s %sさんがインシデントチャンネルを作成しました\n", createdAt.Format("2006-01-02 15:04:05"), h.repository.GetUserPreferredName(createdUser))
-	// - yyyy-MM-dd HH:mm:ss messageの形式でメッセージを取得
 
-	type message struct {
-		ts   time.Time
-		text string
-		user string
-	}
-
-	var messages []message
 	var userCache = map[string]string{}
-	for _, m := range pinnedMessages {
+	for _, m := range slackMessages {
 		ts, err := parseSlackTimestamp(m.Timestamp)
 		if err != nil {
-			return fmt.Errorf("failed to parseSlackTimestamp: %w", err)
+			continue
 		}
 		if userCache[m.User] == "" {
 			user, err := h.repository.GetUserByID(m.User)
 			if err != nil {
-				return fmt.Errorf("failed to GetUserByID: %w", err)
+				userCache[m.User] = m.User
+			} else {
+				userCache[m.User] = h.repository.GetUserPreferredName(user)
 			}
-			userCache[m.User] = h.repository.GetUserPreferredName(user)
 		}
-		messages = append(messages, message{
-			ts:   ts,
-			text: m.Text,
-			user: userCache[m.User],
-		})
-	}
-
-	// messageを時系列順に並び替え
-	sort.Slice(messages, func(i, j int) bool {
-		return messages[i].ts.Before(messages[j].ts)
-	})
-
-	for _, m := range messages {
-		formattedMessages += fmt.Sprintf("- %s %s:%s\n", m.ts.Format("2006-01-02 15:04:05"), m.user, m.text)
+		formattedMessages += fmt.Sprintf("- %s %s:%s\n", ts.Format("2006-01-02 15:04:05"), userCache[m.User], m.Text)
 	}
 	formattedMessages += fmt.Sprintf("- %s %sさんがインシデントを復旧を宣言\n", recoveredAt.Format("2006-01-02 15:04:05"), h.repository.GetUserPreferredName(recoveredUser))
+
+	// トークン制限対策：メッセージが多い場合は要約
+	if h.aiRepository != nil && len(slackMessages) > 0 {
+		preparedMessages, err := h.aiRepository.PrepareMessagesForPostMortem(slackMessages, incident.Description)
+		if err != nil {
+			slog.Warn("failed to PrepareMessagesForPostMortem, using raw messages", slog.Any("err", err))
+		} else if preparedMessages != "" {
+			// 要約されたメッセージを使用（インシデント開始・終了は保持）
+			formattedMessages = fmt.Sprintf("- %s %sさんがインシデントチャンネルを作成しました\n", createdAt.Format("2006-01-02 15:04:05"), h.repository.GetUserPreferredName(createdUser))
+			formattedMessages += preparedMessages
+			formattedMessages += fmt.Sprintf("- %s %sさんがインシデントを復旧を宣言\n", recoveredAt.Format("2006-01-02 15:04:05"), h.repository.GetUserPreferredName(recoveredUser))
+		}
+	}
 
 	channelURL := fmt.Sprintf("%sarchives/%s", h.workSpaceURL, channel.ID)
 

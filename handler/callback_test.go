@@ -74,6 +74,10 @@ func (m *mockAIRepository) AnalyzeRemainingTasks(description, slackMessages stri
 	return "データベースの性能確認、監視アラートの閾値調整", nil
 }
 
+func (m *mockAIRepository) PrepareMessagesForPostMortem(messages []slack.Message, description string) (string, error) {
+	return "", nil
+}
+
 func TestSummarizeProgress(t *testing.T) {
 	t.Setenv("TEST_MODE", "true")
 
@@ -500,5 +504,80 @@ func TestGetNotificationType(t *testing.T) {
 				t.Errorf("Expected %s, got %s", tt.expectedResult, result)
 			}
 		})
+	}
+}
+
+func TestPrepareMessagesForPostMortem(t *testing.T) {
+	t.Setenv("TEST_MODE", "true")
+
+	mockAI := &mockAIRepository{}
+
+	// AIRepositorierインターフェースが正しく実装されているかテスト
+	var aiRepo repository.AIRepositorier = mockAI
+
+	messages := []slack.Message{
+		{
+			Msg: slack.Msg{
+				User:      "user1",
+				Text:      "障害が発生しました",
+				Timestamp: "1234567890.123456",
+			},
+		},
+		{
+			Msg: slack.Msg{
+				User:      "user2",
+				Text:      "原因を調査中です",
+				Timestamp: "1234567891.123456",
+			},
+		},
+	}
+
+	result, err := aiRepo.PrepareMessagesForPostMortem(messages, "テストインシデント")
+	if err != nil {
+		t.Errorf("PrepareMessagesForPostMortem should not return error: %v", err)
+	}
+
+	// モックは空文字を返すので、空文字でもエラーにならないことを確認
+	if result != "" {
+		t.Logf("PrepareMessagesForPostMortem returned: %s", result)
+	}
+}
+
+func TestTokenCalculatorSplitMessagesWithPriority(t *testing.T) {
+	t.Setenv("TEST_MODE", "true")
+
+	tokenCalc, err := repository.NewTokenCalculator()
+	if tokenCalc == nil || err != nil {
+		t.Skip("TokenCalculator not available, skipping test")
+	}
+
+	// 重要なキーワードを含むメッセージと通常のメッセージを作成
+	messages := []slack.Message{
+		{
+			Msg: slack.Msg{
+				User:      "user1",
+				Text:      "通常のメッセージ",
+				Timestamp: "1234567890.123456",
+			},
+		},
+		{
+			Msg: slack.Msg{
+				User:      "user2",
+				Text:      "障害の原因が判明しました",
+				Timestamp: "1234567891.123456",
+			},
+		},
+		{
+			Msg: slack.Msg{
+				User:      "user3",
+				Text:      "復旧対応を開始します",
+				Timestamp: "1234567892.123456",
+			},
+		},
+	}
+
+	chunks := tokenCalc.SplitMessagesWithPriority(messages, "base prompt", 1000)
+	if len(chunks) == 0 {
+		t.Error("Expected at least one chunk")
 	}
 }

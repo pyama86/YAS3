@@ -28,6 +28,7 @@ type AIRepositorier interface {
 	GenerateLessonsLearned(description, slackMessages string) (string, string, string, error) // うまくいったこと、うまくいかなかったこと、幸運だったこと
 	FormatTimeline(rawTimeline string) (string, error)
 	AnalyzeRemainingTasks(description, slackMessages string) (string, error)
+	PrepareMessagesForPostMortem(messages []slack.Message, description string) (string, error)
 }
 
 type AIRepository struct {
@@ -172,7 +173,7 @@ func (h *AIRepository) SummarizeProgressAdvanced(description string, messages []
 	totalTokens := tokenCalc.CountMessagesTokens(messages, basePrompt)
 
 	// トークン制限内の場合は一度に処理
-	if totalTokens <= MaxTokensGPT4 {
+	if totalTokens <= GetMaxTokens() {
 		return h.processSingleChunk(basePrompt, messages, tokenCalc)
 	}
 
@@ -280,7 +281,7 @@ func (h *AIRepository) processSingleChunk(basePrompt string, messages []slack.Me
 // 複数チャンクでの分割処理
 func (h *AIRepository) processMultipleChunks(basePrompt string, messages []slack.Message, tokenCalc *TokenCalculator) (string, error) {
 	// メッセージを重要度付きで分割
-	chunks := tokenCalc.SplitMessagesWithPriority(messages, basePrompt, MaxTokensGPT4)
+	chunks := tokenCalc.SplitMessagesWithPriority(messages, basePrompt, GetMaxTokens())
 
 	if len(chunks) == 0 {
 		return "", fmt.Errorf("no messages to process")
@@ -673,4 +674,108 @@ func (h *AIRepository) AnalyzeRemainingTasks(description, slackMessages string) 
 %s`, description, slackMessages)
 
 	return h.callOpenAIWithRetry(prompt)
+}
+
+// ポストモーテム用のメッセージ前処理（トークン制限対応）
+func (h *AIRepository) PrepareMessagesForPostMortem(messages []slack.Message, description string) (string, error) {
+	tokenCalc, err := NewTokenCalculator()
+	if err != nil {
+		return h.formatMessagesSimple(messages), nil
+	}
+
+	// ポストモーテム用のベースプロンプト（各AI関数で使用される想定トークン数）
+	basePromptTokens := 500
+
+	// メッセージをフォーマット
+	var formattedMessages strings.Builder
+	for _, msg := range messages {
+		formattedMessages.WriteString(tokenCalc.FormatMessage(msg))
+		formattedMessages.WriteString("\n")
+	}
+
+	totalTokens := tokenCalc.CountTokens(formattedMessages.String()) + basePromptTokens
+	if totalTokens <= GetMaxTokens() {
+		return formattedMessages.String(), nil
+	}
+
+	// トークン制限を超える場合は要約処理
+	return h.summarizeMessagesForPostMortem(messages, description, tokenCalc)
+}
+
+// ポストモーテム用のメッセージ要約
+func (h *AIRepository) summarizeMessagesForPostMortem(messages []slack.Message, description string, tokenCalc *TokenCalculator) (string, error) {
+	basePrompt := fmt.Sprintf(`## 依頼内容
+以下のSlackメッセージを、ポストモーテム作成に必要な情報を保持しながら要約してください。
+
+## フォーマットの指定：
+- 時系列順に重要な出来事をまとめてください
+- 技術的な詳細（エラーメッセージ、対応内容など）は保持してください
+- 各アイテムは「時刻 担当者: 内容」の形式で記載してください
+- 最大50項目程度にまとめてください
+
+## インシデント概要
+%s
+
+## Slackメッセージ`, description)
+
+	// メッセージを重要度付きで分割
+	chunks := tokenCalc.SplitMessagesWithPriority(messages, basePrompt, GetMaxTokens())
+
+	if len(chunks) == 0 {
+		return "", fmt.Errorf("no messages to process")
+	}
+
+	if len(chunks) == 1 {
+		// 1チャンクの場合は直接要約
+		return h.summarizeSingleChunk(basePrompt, chunks[0], tokenCalc)
+	}
+
+	// 複数チャンクの場合は各チャンクを要約して統合
+	var partialSummaries []string
+	for i, chunk := range chunks {
+		chunkPrompt := fmt.Sprintf("%s\n\n## 部分 %d/%d のメッセージ", basePrompt, i+1, len(chunks))
+
+		summary, err := h.summarizeSingleChunk(chunkPrompt, chunk, tokenCalc)
+		if err != nil {
+			return "", fmt.Errorf("failed to summarize chunk %d: %w", i+1, err)
+		}
+		partialSummaries = append(partialSummaries, summary)
+	}
+
+	// 部分要約を統合
+	return h.mergePostMortemSummaries(partialSummaries)
+}
+
+// 単一チャンクの要約
+func (h *AIRepository) summarizeSingleChunk(basePrompt string, messages []slack.Message, tokenCalc *TokenCalculator) (string, error) {
+	var messageText strings.Builder
+	for _, msg := range messages {
+		messageText.WriteString(tokenCalc.FormatMessage(msg))
+		messageText.WriteString("\n")
+	}
+
+	fullPrompt := basePrompt + "\n" + messageText.String()
+	return h.callOpenAIWithRetry(fullPrompt)
+}
+
+// ポストモーテム用要約の統合
+func (h *AIRepository) mergePostMortemSummaries(summaries []string) (string, error) {
+	var builder strings.Builder
+	builder.WriteString(`## 依頼内容
+以下は複数の部分的なインシデントタイムライン要約です。
+これらを統合して、1つの完全なタイムラインを作成してください。
+
+## フォーマットの指定：
+- 時系列順に整理してください
+- 重複を排除してください
+- 重要な出来事のみを保持してください
+- 「時刻 担当者: 内容」の形式を維持してください
+
+`)
+
+	for i, summary := range summaries {
+		builder.WriteString(fmt.Sprintf("## 部分要約 %d\n%s\n\n", i+1, summary))
+	}
+
+	return h.callOpenAIWithRetryWithErrorHandling(builder.String())
 }

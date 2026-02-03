@@ -129,6 +129,10 @@ func (m *mockSlackRepo) GetChannelMessagesAfter(channelID, after string) ([]slac
 	return []slack.Message{}, nil
 }
 
+func (m *mockSlackRepo) GetAllChannelMessages(channelID string) ([]slack.Message, error) {
+	return []slack.Message{}, nil
+}
+
 func (m *mockSlackRepo) GetThreadReplies(channelID, threadTS string) ([]slack.Message, error) {
 	return []slack.Message{}, nil
 }

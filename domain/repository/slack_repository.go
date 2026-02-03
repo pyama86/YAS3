@@ -32,6 +32,7 @@ type SlackRepositoryer interface {
 	GetChannelHistory(channelID, oldest, latest string, limit int) ([]slack.Message, error)
 	GetThreadReplies(channelID, threadTS string) ([]slack.Message, error)
 	GetChannelMessagesAfter(channelID, afterTS string) ([]slack.Message, error)
+	GetAllChannelMessages(channelID string) ([]slack.Message, error)
 	GetUserPreferredName(user *slack.User) string
 	UploadFile(workspackeURL, userID, channelID, filename, title, content string) (string, error)
 	FlushChannelCache()
@@ -411,24 +412,7 @@ func (h *SlackRepository) GetPinnedMessages(channelID string) ([]slack.Message, 
 		}
 		msg := *item.Message
 		if msg.Text != "" {
-			newText := re.ReplaceAllStringFunc(msg.Text, func(match string) string {
-				submatches := re.FindStringSubmatch(match)
-				if len(submatches) < 2 {
-					return match
-				}
-				userID := submatches[1]
-				if realName, ok := cache[userID]; ok {
-					return "@" + realName
-				}
-				user, err := h.GetUserByID(userID)
-				if err != nil {
-					return match
-				}
-				realName := h.GetUserPreferredName(user)
-				cache[userID] = realName
-				return "@" + realName
-			})
-			msg.Text = newText
+			msg.Text = h.convertMentions(msg.Text, re, cache)
 		}
 		messages = append(messages, msg)
 	}
@@ -589,4 +573,95 @@ func (h *SlackRepository) GetChannelMessagesAfter(channelID, afterTS string) ([]
 	}
 
 	return allMessages, nil
+}
+
+// チャンネル内の全メッセージを取得（スレッド・メンション変換込み）
+func (h *SlackRepository) GetAllChannelMessages(channelID string) ([]slack.Message, error) {
+	var allMessages []slack.Message
+	var cursor string
+
+	re := regexp.MustCompile(`<@([A-Z0-9]+)>`)
+	mentionCache := make(map[string]string)
+
+	for {
+		params := &slack.GetConversationHistoryParameters{
+			ChannelID: channelID,
+			Limit:     200,
+		}
+		if cursor != "" {
+			params.Cursor = cursor
+		}
+
+		var resp *slack.GetConversationHistoryResponse
+		err := retry.Retry(3, time.Second*3, func() error {
+			var err error
+			resp, err = h.client.GetConversationHistory(params)
+			if err != nil {
+				slog.Warn("GetAllChannelMessages", slog.Any("channelID", channelID), slog.Any("err", err))
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get channel history: %w", err)
+		}
+
+		for _, msg := range resp.Messages {
+			// ボットメッセージを除外
+			if msg.BotID != "" || msg.SubType == "bot_message" {
+				continue
+			}
+			// システムメッセージを除外
+			if msg.SubType == "channel_join" || msg.SubType == "channel_leave" {
+				continue
+			}
+
+			// メンション変換
+			msg.Text = h.convertMentions(msg.Text, re, mentionCache)
+			allMessages = append(allMessages, msg)
+
+			// スレッドがある場合は返信も取得
+			if msg.ThreadTimestamp != "" && msg.ThreadTimestamp == msg.Timestamp {
+				replies, err := h.GetThreadReplies(channelID, msg.Timestamp)
+				if err != nil {
+					slog.Warn("Failed to get thread replies", slog.Any("err", err))
+					continue
+				}
+				for _, reply := range replies {
+					if reply.Timestamp != msg.Timestamp {
+						reply.Text = h.convertMentions(reply.Text, re, mentionCache)
+						allMessages = append(allMessages, reply)
+					}
+				}
+			}
+		}
+
+		if !resp.HasMore {
+			break
+		}
+		cursor = resp.ResponseMetaData.NextCursor
+	}
+
+	return allMessages, nil
+}
+
+// メンションをユーザー名に変換
+func (h *SlackRepository) convertMentions(text string, re *regexp.Regexp, cache map[string]string) string {
+	return re.ReplaceAllStringFunc(text, func(match string) string {
+		submatches := re.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		userID := submatches[1]
+		if realName, ok := cache[userID]; ok {
+			return "@" + realName
+		}
+		user, err := h.GetUserByID(userID)
+		if err != nil {
+			return match
+		}
+		realName := h.GetUserPreferredName(user)
+		cache[userID] = realName
+		return "@" + realName
+	})
 }
