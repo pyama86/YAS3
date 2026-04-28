@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/pyama86/YAS3/domain/entity"
@@ -18,6 +19,8 @@ type ConfluenceRepository struct {
 }
 
 func NewConfluenceRepository(domain, user, password, spaceKey, ancestorID string) (*ConfluenceRepository, error) {
+	goconfluence.SetDebug(os.Getenv("CONFLUENCE_DEBUG") != "")
+
 	api, err := goconfluence.NewAPI(
 		fmt.Sprintf("https://%s.atlassian.net/wiki/rest/api", domain),
 		user,
