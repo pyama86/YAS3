@@ -102,7 +102,7 @@ func (h *EventHandler) handleMetionEvent(event *slackevents.AppMentionEvent) err
 		}
 	} else {
 		msgOptions := []slack.MsgOption{
-			slack.MsgOptionBlocks(blocks.IncidentMenu()...),
+			slack.MsgOptionBlocks(blocks.IncidentMenu(h.config.IsManualGlobalAnnouncement())...),
 		}
 		if event.ThreadTimeStamp != "" {
 			msgOptions = append(msgOptions, slack.MsgOptionTS(event.ThreadTimeStamp))

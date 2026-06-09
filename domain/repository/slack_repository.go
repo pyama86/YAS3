@@ -25,6 +25,7 @@ type SlackRepositoryer interface {
 	UpdateMessage(channelID, ts string, opts ...slack.MsgOption)
 	DeleteMessage(channelID, ts string)
 	OpenView(triggerID string, view slack.ModalViewRequest) error
+	UpdateView(externalID string, view slack.ModalViewRequest) error
 	CreateConversation(params slack.CreateConversationParams) (*slack.Channel, error)
 	SetTopicOfConversation(channelID, topic string) error
 	InviteUsersToConversation(channelID string, users ...string) error
@@ -335,6 +336,13 @@ func (h *SlackRepository) GetMemberIDs(name string) ([]string, error) {
 		}
 	}
 	return nil, ErrSlackNotFound
+}
+
+func (h *SlackRepository) UpdateView(externalID string, view slack.ModalViewRequest) error {
+	return retry.Retry(3, 500*time.Millisecond, func() error {
+		_, err := h.client.UpdateView(view, externalID, "", "")
+		return err
+	})
 }
 
 func (h *SlackRepository) OpenView(triggerID string, view slack.ModalViewRequest) error {
