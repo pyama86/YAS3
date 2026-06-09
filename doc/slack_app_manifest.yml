@@ -1,0 +1,32 @@
+display_information:
+  name: YAS3
+  description: Yet Another Slack Survival System - incident response bot
+  background_color: "#d40e0e"
+features:
+  bot_user:
+    display_name: YAS3
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:read
+      - channels:history
+      - channels:manage
+      - chat:write
+      - chat:write.public
+      - pins:read
+      - files:write
+      - usergroups:read
+      - users:read
+      - users:read.email
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - channel_archive
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

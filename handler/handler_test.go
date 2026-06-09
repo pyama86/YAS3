@@ -83,6 +83,10 @@ func (m *mockSlackRepo) UpdateMessage(channelID, timestamp string, options ...sl
 
 func (m *mockSlackRepo) DeleteMessage(channelID, timestamp string) {}
 
+func (m *mockSlackRepo) UpdateView(externalID string, view slack.ModalViewRequest) error {
+	return nil
+}
+
 func (m *mockSlackRepo) OpenView(triggerID string, view slack.ModalViewRequest) error {
 	return nil
 }

@@ -4,7 +4,7 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func IncidentMenu() []slack.Block {
+func IncidentMenu(manualGlobalAnnounce bool) []slack.Block {
 	return []slack.Block{
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject(
@@ -21,7 +21,7 @@ func IncidentMenu() []slack.Block {
 				slack.OptTypeStatic,
 				slack.NewTextBlockObject("plain_text", "操作を選択してください", false, false),
 				"in_channel_options",
-				InChannelOptions()...,
+				InChannelOptions(manualGlobalAnnounce)...,
 			),
 			slack.NewButtonBlockElement(
 				"cancel_action",

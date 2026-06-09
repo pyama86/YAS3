@@ -6,7 +6,7 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func CheckPoint(elapsedStr string) []slack.Block {
+func CheckPoint(elapsedStr string, manualGlobalAnnounce bool) []slack.Block {
 	blocks := []slack.Block{}
 
 	// 0時間0分の場合はチェックポイントメッセージを表示しない
@@ -41,7 +41,7 @@ func CheckPoint(elapsedStr string) []slack.Block {
 				slack.OptTypeStatic,
 				slack.NewTextBlockObject("plain_text", "操作を選択してください", false, false),
 				"in_channel_options",
-				InChannelOptions()...,
+				InChannelOptions(manualGlobalAnnounce)...,
 			),
 			slack.NewButtonBlockElement(
 				"progress_summary_action",
