@@ -14,6 +14,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/openai/openai-go v0.1.0-alpha.67
+	github.com/pkoukk/tiktoken-go v0.1.7
 	github.com/russross/blackfriday/v2 v2.1.0
 	github.com/slack-go/slack v0.16.0
 	github.com/spf13/cobra v1.9.1
@@ -46,7 +47,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
@@ -55,7 +56,6 @@ require (
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/magefile/mage v1.14.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
-	github.com/pkoukk/tiktoken-go v0.1.7 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
