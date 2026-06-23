@@ -1,6 +1,6 @@
 module github.com/pyama86/YAS3
 
-go 1.23.4
+go 1.25
 
 require (
 	github.com/Songmu/retry v0.1.0
@@ -14,11 +14,12 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/openai/openai-go v0.1.0-alpha.67
+	github.com/pkoukk/tiktoken-go v0.1.7
 	github.com/russross/blackfriday/v2 v2.1.0
-	github.com/slack-go/slack v0.16.0
+	github.com/slack-go/slack v0.23.1
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.0
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	github.com/virtomize/confluence-go-api v1.5.0
 )
 
@@ -49,13 +50,12 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gorilla/websocket v1.4.2 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/magefile/mage v1.14.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
-	github.com/pkoukk/tiktoken-go v0.1.7 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
