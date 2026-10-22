@@ -104,7 +104,7 @@ func Handle(ctx context.Context, configPath string) error {
 					// StartedAtから15分間隔で判定
 					elapsed := now.Sub(incident.StartedAt)
 					if int(elapsed.Minutes())%15 == 0 && int(elapsed.Seconds())%60 < 60 {
-						if err := timeKeeperMessage(webApi, &incident, slackRepository); err != nil {
+						if err := timeKeeperMessage(webApi, &incident, slackRepository, cfgRepository.IsManualGlobalAnnouncement()); err != nil {
 							slog.Error("Failed to send time keeper message", slog.Any("err", err))
 						}
 					}
@@ -148,7 +148,7 @@ func Handle(ctx context.Context, configPath string) error {
 	return socketMode.Run()
 }
 
-func timeKeeperMessage(client *slack.Client, incident *entity.Incident, slackRepository *repository.SlackRepository) error {
+func timeKeeperMessage(client *slack.Client, incident *entity.Incident, slackRepository *repository.SlackRepository, manualGlobalAnnounce bool) error {
 	channelID := incident.ChannelID
 	channel, err := slackRepository.GetChannelByID(channelID)
 	if err != nil {
@@ -169,7 +169,7 @@ func timeKeeperMessage(client *slack.Client, incident *entity.Incident, slackRep
 	// 15分ごとのチェックポイントの案内
 	_, _, err = client.PostMessage(
 		channelID,
-		slack.MsgOptionBlocks(blocks.CheckPoint(elapsedStr)...),
+		slack.MsgOptionBlocks(blocks.CheckPoint(elapsedStr, manualGlobalAnnounce)...),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to post time keeper message %s: %w", channel.Name, err)

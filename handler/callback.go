@@ -216,6 +216,11 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 				if err := h.openEditSummaryModal(callback.TriggerID, callback.Channel.ID); err != nil {
 					return fmt.Errorf("openEditSummaryModal failed: %w", err)
 				}
+			case "announce_global":
+				slog.Info("announce_global", slog.Any("channelID", callback.Channel.ID))
+				if err := h.openGlobalAnnounceModal(callback.TriggerID, callback.Channel.ID); err != nil {
+					return fmt.Errorf("openGlobalAnnounceModal failed: %w", err)
+				}
 			case "create_postmortem":
 				slog.Info("create_postmortem", slog.Any("channelID", callback.Channel.ID))
 				if err := h.showPostMortemButton(callback.Channel.ID); err != nil {
@@ -290,6 +295,10 @@ func (h *CallbackHandler) Handle(callback *slack.InteractionCallback) error {
 		case "edit_summary_modal":
 			if err := h.submitEditSummaryModal(callback); err != nil {
 				return fmt.Errorf("submitEditSummaryModal failed: %w", err)
+			}
+		case "global_announce_modal":
+			if err := h.submitGlobalAnnounceModal(callback); err != nil {
+				return fmt.Errorf("submitGlobalAnnounceModal failed: %w", err)
 			}
 		case "link_incident_modal":
 			if err := h.submitLinkIncidentModal(callback); err != nil {
@@ -1059,8 +1068,8 @@ func (h *CallbackHandler) broadCastAnnouncement(channelID string, attachment sla
 		}
 	}
 
-	// グローバルアナウンスチャンネルを追加
-	if h.config != nil {
+	// グローバルアナウンスチャンネルを追加（手動通知モードの場合はスキップし、メニュー操作時のみ通知する）
+	if h.config != nil && !h.config.IsManualGlobalAnnouncement() {
 		for _, c := range h.config.GetGlobalAnnouncementChannels(h.ctx) {
 			announceChannels[c] = true
 		}
@@ -1457,7 +1466,7 @@ func (h *CallbackHandler) createProgressSummaryFallback(channel slack.Channel, i
 	// Slackメッセージを整形してタイムラインとして渡す
 	var timeline strings.Builder
 	for _, msg := range pinnedMessages {
-		timeline.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+		fmt.Fprintf(&timeline, "%s: %s\n", msg.User, msg.Text)
 	}
 
 	// AIで進捗サマリを生成（従来の方式）
@@ -1674,7 +1683,7 @@ func (h *CallbackHandler) createProgressSummaryFallbackWithUpdate(channel slack.
 	// Slackメッセージを整形してタイムラインとして渡す
 	var timeline strings.Builder
 	for _, msg := range pinnedMessages {
-		timeline.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+		fmt.Fprintf(&timeline, "%s: %s\n", msg.User, msg.Text)
 	}
 
 	// AIで進捗サマリを生成（従来の方式）
@@ -2199,7 +2208,7 @@ func (h *CallbackHandler) postIncidentDetail(channelID, threadTS string, inciden
 			// メッセージを整形
 			var formattedMessages strings.Builder
 			for _, msg := range messages {
-				formattedMessages.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+				fmt.Fprintf(&formattedMessages, "%s: %s\n", msg.User, msg.Text)
 			}
 
 			// AI で残件分析

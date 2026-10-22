@@ -1,5 +1,9 @@
 global_announcement_channels = ["all-pyama-dev"]
 
+# trueにするとglobal_announcement_channelsへの自動通知を止め、
+# インシデントチャンネルのメニュー操作時のみ手動で周知します（入力モーダルでAIが下書きを生成）
+manual_global_announcement = true
+
 [default_confluence]
 domain = "example"
 space = "YAS3"

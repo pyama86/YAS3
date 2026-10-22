@@ -21,6 +21,7 @@ type AIRepositorier interface {
 	GenerateTitle(description, slackMessages string) (string, error)
 	GenerateStatus(description, slackMessages string) (string, error)
 	GenerateImpact(description, slackMessages string) (string, error)
+	GenerateOccurredAt(description, slackMessages, defaultTime string) (string, error)
 	GenerateRootCause(description, slackMessages string) (string, error)
 	GenerateTrigger(description, slackMessages string) (string, error)
 	GenerateSolution(description, slackMessages string) (string, error)
@@ -312,7 +313,7 @@ func (h *AIRepository) processMultipleChunks(basePrompt string, messages []slack
 func (h *AIRepository) formatMessagesSimple(messages []slack.Message) string {
 	var builder strings.Builder
 	for _, msg := range messages {
-		builder.WriteString(fmt.Sprintf("%s: %s\n", msg.User, msg.Text))
+		fmt.Fprintf(&builder, "%s: %s\n", msg.User, msg.Text)
 	}
 	return builder.String()
 }
@@ -774,8 +775,33 @@ func (h *AIRepository) mergePostMortemSummaries(summaries []string) (string, err
 `)
 
 	for i, summary := range summaries {
-		builder.WriteString(fmt.Sprintf("## 部分要約 %d\n%s\n\n", i+1, summary))
+		fmt.Fprintf(&builder, "## 部分要約 %d\n%s\n\n", i+1, summary)
 	}
 
 	return h.callOpenAIWithRetryWithErrorHandling(builder.String())
+}
+
+// GenerateOccurredAt は発生日時を推定する。
+// Slackメッセージ内に発生時刻の手がかりがあればそれを優先し、無ければdefaultTimeを返す
+func (h *AIRepository) GenerateOccurredAt(description, slackMessages, defaultTime string) (string, error) {
+	prompt := fmt.Sprintf(`## 依頼内容
+インシデントの発生日時を推定してください。
+あなたには、人間が考えた事象の概要、Slackのメッセージ、既定の発生日時（システム記録）が与えられます。
+
+## フォーマットの指定：
+- 「YYYY-MM-DD HH:MM」形式で発生日時のみを返してください。
+- Slackメッセージ内に発生時刻を示す情報があればそれを優先してください。
+- 手がかりが無い場合は、与えられた既定の発生日時をそのまま返してください。
+- 余計な説明やラベルは付けず、日時の文字列だけを返してください。
+
+## 既定の発生日時
+%s
+
+## 人間が考えた事象の概要
+%s
+
+## 関連するSlackのメッセージ
+%s`, defaultTime, description, slackMessages)
+
+	return h.callOpenAIWithRetry(prompt)
 }

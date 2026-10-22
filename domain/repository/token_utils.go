@@ -181,7 +181,7 @@ func (tc *TokenCalculator) CreateMergePrompt(summaries []string) string {
 	builder.WriteString("以下は複数の部分的なインシデント進捗サマリです。これらを統合して一つの完全なサマリを作成してください：\n\n")
 
 	for i, summary := range summaries {
-		builder.WriteString(fmt.Sprintf("## 部分サマリ %d\n%s\n\n", i+1, summary))
+		fmt.Fprintf(&builder, "## 部分サマリ %d\n%s\n\n", i+1, summary)
 	}
 
 	builder.WriteString("これらの情報を統合し、重複を排除して、以下の構成で最終サマリを作成してください：\n")

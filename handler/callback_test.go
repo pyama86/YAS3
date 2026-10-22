@@ -46,6 +46,10 @@ func (m *mockAIRepository) GenerateImpact(description, slackMessages string) (st
 	return "", nil
 }
 
+func (m *mockAIRepository) GenerateOccurredAt(description, slackMessages, defaultTime string) (string, error) {
+	return "", nil
+}
+
 func (m *mockAIRepository) GenerateRootCause(description, slackMessages string) (string, error) {
 	return "", nil
 }

@@ -2,8 +2,8 @@ package blocks
 
 import "github.com/slack-go/slack"
 
-func InChannelOptions() []*slack.OptionBlockObject {
-	return []*slack.OptionBlockObject{
+func InChannelOptions(manualGlobalAnnounce bool) []*slack.OptionBlockObject {
+	options := []*slack.OptionBlockObject{
 		slack.NewOptionBlockObject(
 			"set_incident_level",
 			slack.NewTextBlockObject("plain_text", "⚙️ 事象レベルをセットする", false, false),
@@ -40,4 +40,12 @@ func InChannelOptions() []*slack.OptionBlockObject {
 			nil,
 		),
 	}
+	if manualGlobalAnnounce {
+		options = append(options, slack.NewOptionBlockObject(
+			"announce_global",
+			slack.NewTextBlockObject("plain_text", "📢 障害報告を送る", false, false),
+			nil,
+		))
+	}
+	return options
 }

@@ -42,6 +42,7 @@ type Config struct {
 	IncidentLevelList          []entity.IncidentLevel  `mapstructure:"incident_levels" validate:"required"`
 	DefaultConfluence          entity.ConfluenceConfig `mapstructure:"default_confluence"`
 	NotificationType           string                  `mapstructure:"notification_type" validate:"omitempty,oneof=none here channel"`
+	ManualGlobalAnnouncement   bool                    `mapstructure:"manual_global_announcement"`
 }
 
 func (c *Config) Services(_ context.Context) ([]entity.Service, error) {
@@ -102,4 +103,13 @@ func (c *Config) GetNotificationType() string {
 		return "here"
 	}
 	return c.NotificationType
+}
+
+// IsManualGlobalAnnouncement は global_announcement_channels への通知を
+// 手動（インシデントチャンネルのメニュー操作時のみ）にするかどうかを返す
+func (c *Config) IsManualGlobalAnnouncement() bool {
+	if c == nil {
+		return false
+	}
+	return c.ManualGlobalAnnouncement
 }
