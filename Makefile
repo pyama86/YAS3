@@ -22,7 +22,7 @@ test:
 devdeps:
 	@echo ">> Installing development dependencies"
 	which goimports > /dev/null || go install golang.org/x/tools/cmd/goimports@latest
-	which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 	which mockgen > /dev/null || go install go.uber.org/mock/mockgen@latest
 
 up:
