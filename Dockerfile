@@ -1,4 +1,4 @@
-FROM golang:latest as builder
+FROM golang:1.27.3 as builder
 ADD . /opt/yas3
 WORKDIR /opt/yas3/
 ENV CGO_ENABLED=0
