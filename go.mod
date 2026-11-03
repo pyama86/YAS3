@@ -17,7 +17,7 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/russross/blackfriday/v2 v2.1.0
 	github.com/slack-go/slack v0.16.0
-	github.com/spf13/cobra v1.9.1
+	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/virtomize/confluence-go-api v1.5.0
