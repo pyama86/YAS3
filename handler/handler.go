@@ -117,7 +117,9 @@ func Handle(ctx context.Context, configPath string) error {
 		for envelope := range socketMode.Events {
 			switch envelope.Type {
 			case socketmode.EventTypeEventsAPI:
-				socketMode.Ack(*envelope.Request)
+				if err := socketMode.Ack(*envelope.Request); err != nil {
+				slog.Error("Failed to ack", slog.Any("err", err))
+			}
 				eventPayload, ok := envelope.Data.(slackevents.EventsAPIEvent)
 				if !ok {
 					slog.Error("Failed to cast to EventsAPIEvent")
@@ -132,7 +134,9 @@ func Handle(ctx context.Context, configPath string) error {
 					}
 				}
 			case socketmode.EventTypeInteractive:
-				socketMode.Ack(*envelope.Request)
+				if err := socketMode.Ack(*envelope.Request); err != nil {
+				slog.Error("Failed to ack", slog.Any("err", err))
+			}
 				callback, ok := envelope.Data.(slack.InteractionCallback)
 				if !ok {
 					slog.Error("Failed to cast to InteractionCallback")

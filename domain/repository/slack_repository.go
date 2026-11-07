@@ -437,7 +437,7 @@ func (h *SlackRepository) GetUserPreferredName(user *slack.User) string {
 	return user.Name
 }
 func (h *SlackRepository) UploadFile(workspackeURL, userID, channelID, filename, title, content string) (string, error) {
-	f, err := h.client.UploadFileV2(slack.UploadFileV2Parameters{
+	f, err := h.client.UploadFile(slack.UploadFileParameters{
 		Channel:  channelID,
 		Filename: filename,
 		Title:    title,
