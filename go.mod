@@ -20,7 +20,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
-	github.com/virtomize/confluence-go-api v1.5.0
+	github.com/virtomize/confluence-go-api v1.5.1
 )
 
 require (
