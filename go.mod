@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.18
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.0
-	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.74.0
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.74.1
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/guregu/dynamo/v2 v2.6.0
 	github.com/jellydator/ttlcache/v3 v3.4.1
