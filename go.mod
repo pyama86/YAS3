@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/Songmu/retry v0.1.0
 	github.com/aws/aws-sdk-go-v2 v1.48.0
-	github.com/aws/aws-sdk-go-v2/config v1.33.18
+	github.com/aws/aws-sdk-go-v2/config v1.33.21
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.3
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.74.1
 	github.com/go-playground/validator/v10 v10.30.6
